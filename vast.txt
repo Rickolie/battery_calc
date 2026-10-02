@@ -1,0 +1,283 @@
+Exclusief btw
+
+Enkeltarief
+
+€ 0,13256 per kWh
+
+Normaaltarief
+
+€ 0,13445 per kWh
+
+Daltarief
+
+€ 0,12405 per kWh
+
+Teruglevering enkeltarief
+
+€ 0,05000 per kWh
+
+Teruglevering normaal
+
+€ 0,05000 per kWh
+
+Teruglevering dal
+
+€ 0,05000 per kWh
+
+Terugleverkosten enkel
+
+€ 0,00000 per kWh
+
+Terugleverkosten normaal
+
+€ 0,00000 per kWh
+
+Terugleverkosten dal
+
+€ 0,00000 per kWh
+
+Vaste leveringskosten
+
+€ 0,37 per dag
+€ 135,00 per jaar
+
+Terugleverkosten enkel (0-1 kWh)
+
+€ 0,00 per dag
+€ 0,00 per jaar
+
+Terugleverkosten enkel (1-1001 kWh)
+
+€ 0,12 per dag
+€ 42,00 per jaar
+
+Terugleverkosten enkel (1001-2001 kWh)
+
+€ 0,37 per dag
+€ 136,00 per jaar
+
+Terugleverkosten enkel (2001-3001 kWh)
+
+€ 0,63 per dag
+€ 231,00 per jaar
+
+Terugleverkosten enkel (3001-4001 kWh)
+
+€ 0,89 per dag
+€ 324,00 per jaar
+
+Terugleverkosten enkel (4001-5001 kWh)
+
+€ 1,15 per dag
+€ 421,00 per jaar
+
+Terugleverkosten enkel (5001-7501 kWh)
+
+€ 1,57 per dag
+€ 572,00 per jaar
+
+Terugleverkosten enkel (7501-10001 kWh)
+
+€ 2,15 per dag
+€ 786,00 per jaar
+
+Terugleverkosten enkel (>= 10001 kWh)
+
+€ 3,45 per dag
+€ 1.259,00 per jaar
+
+Netbeheerkosten (Enexis Brabant)
+
+€ 1,08 per dag
+€ 393,25 per jaar
+
+Inclusief btw
+
+Enkeltarief
+
+€ 0,16040 per kWh
+
+Normaaltarief
+
+€ 0,16268 per kWh
+
+Daltarief
+
+€ 0,15010 per kWh
+
+Teruglevering enkeltarief
+
+€ 0,06050 per kWh
+
+Teruglevering normaal
+
+€ 0,06050 per kWh
+
+Teruglevering dal
+
+€ 0,06050 per kWh
+
+Terugleverkosten enkel
+
+€ 0,00000 per kWh
+
+Terugleverkosten normaal
+
+€ 0,00000 per kWh
+
+Terugleverkosten dal
+
+€ 0,00000 per kWh
+
+Vaste leveringskosten
+
+€ 0,45 per dag
+€ 163,35 per jaar
+
+Terugleverkosten enkel (0-1 kWh)
+
+€ 0,00 per dag
+€ 0,00 per jaar
+
+Terugleverkosten enkel (1-1001 kWh)
+
+€ 0,14 per dag
+€ 50,82 per jaar
+
+Terugleverkosten enkel (1001-2001 kWh)
+
+€ 0,45 per dag
+€ 164,56 per jaar
+
+Terugleverkosten enkel (2001-3001 kWh)
+
+€ 0,77 per dag
+€ 279,51 per jaar
+
+Terugleverkosten enkel (3001-4001 kWh)
+
+€ 1,07 per dag
+€ 392,04 per jaar
+
+Terugleverkosten enkel (4001-5001 kWh)
+
+€ 1,40 per dag
+€ 509,41 per jaar
+
+Terugleverkosten enkel (5001-7501 kWh)
+
+€ 1,90 per dag
+€ 692,12 per jaar
+
+Terugleverkosten enkel (7501-10001 kWh)
+
+€ 2,61 per dag
+€ 951,06 per jaar
+
+Terugleverkosten enkel (>= 10001 kWh)
+
+€ 4,17 per dag
+€ 1.523,39 per jaar
+
+Netbeheerkosten (Enexis Brabant)
+
+€ 1,30 per dag
+€ 475,83 per jaar
+
+Inclusief btw en overheidsheffingen
+
+Enkeltarief
+
+€ 0,27125 per kWh
+
+Normaaltarief
+
+€ 0,27353 per kWh
+
+Daltarief
+
+€ 0,26095 per kWh
+
+Teruglevering enkeltarief
+
+€ 0,06050 per kWh
+
+Teruglevering normaal
+
+€ 0,06050 per kWh
+
+Teruglevering dal
+
+€ 0,06050 per kWh
+
+Terugleverkosten enkel
+
+€ 0,00000 per kWh
+
+Terugleverkosten normaal
+
+€ 0,00000 per kWh
+
+Terugleverkosten dal
+
+€ 0,00000 per kWh
+
+Vaste leveringskosten
+
+€ 0,45 per dag
+€ 163,35 per jaar
+
+Terugleverkosten enkel (0-1 kWh)
+
+€ 0,00 per dag
+€ 0,00 per jaar
+
+Terugleverkosten enkel (1-1001 kWh)
+
+€ 0,14 per dag
+€ 50,82 per jaar
+
+Terugleverkosten enkel (1001-2001 kWh)
+
+€ 0,45 per dag
+€ 164,56 per jaar
+
+Terugleverkosten enkel (2001-3001 kWh)
+
+€ 0,77 per dag
+€ 279,51 per jaar
+
+Terugleverkosten enkel (3001-4001 kWh)
+
+€ 1,07 per dag
+€ 392,04 per jaar
+
+Terugleverkosten enkel (4001-5001 kWh)
+
+€ 1,40 per dag
+€ 509,41 per jaar
+
+Terugleverkosten enkel (5001-7501 kWh)
+
+€ 1,90 per dag
+€ 692,12 per jaar
+
+Terugleverkosten enkel (7501-10001 kWh)
+
+€ 2,61 per dag
+€ 951,06 per jaar
+
+Terugleverkosten enkel (>= 10001 kWh)
+
+€ 4,17 per dag
+€ 1.523,39 per jaar
+
+Netbeheerkosten (Enexis Brabant)
+
+€ 1,30 per dag
+€ 475,83 per jaar
+
+Startdatum
+14-04-2025
+Einddatum
+14-04-2027
