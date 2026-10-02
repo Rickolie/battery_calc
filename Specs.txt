@@ -1,0 +1,18 @@
+Inputs given by me (in github repo)
+- csv file with energy data from house homewizzard p1 meter 15min. Energy_house.csv
+- CSV file with dynamic prices from last years. (see example dynamic_prices_energieknl.csv)
+- Current contract (vast) (vast.txt)
+
+Inputs to retreive online:
+- new contracts dynamic prices options.
+- new contracts (vast)
+- List of dutch current available home battery systems. Both plugin and normal, but I can install myself so without installation costs but available to buy without an installer. Add specs like standbyy power usage, RTE, DoD, usable capacity, price with and without btw (tax), lowest price ever and current price (for example from tweakers), price in germany if possible (because of 0%tax). Cyclelife, power.
+
+Assumptions:
+- The export is because of solar panels. Unfortunatelly I don’t have the production data at the moment. But please add the possibility in the program to add it as a csv. 
+- Check the changes in dutch policy and use in calculations.
+
+
+Objectives:
+- Calculate which contract is the best without a battery
+- Calculate which battery system is earned back the fastest with several strategies. Use the strategies from docs.homebatterycontrol.com/. Make sure to not forget to consider all the specs.
