@@ -280,7 +280,7 @@ def test_connection_changes_run(tmp_path):
     assert res["1x35"].loc["big3", "in_scope"] == "no"
     assert res["3x25"].loc["big3", "in_scope"] == "yes"
     assert res["3x25"].loc["big3", "power_cap_w"] == pytest.approx(3 * 25 * 230 * 0.8)
-    assert res["1x35"].loc["marstek_venus_e", "power_cap_w"] == 2500
+    assert res["1x35"].loc["marstek_v3_5", "power_cap_w"] == 2500
 
 
 def test_full_run_both_regimes_and_analyses(tmp_path):

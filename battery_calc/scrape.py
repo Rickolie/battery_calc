@@ -119,41 +119,98 @@ def find_price(html: str) -> float | None:
     return None
 
 
+def _match(label: str, match: str) -> bool:
+    label = label.lower().replace(",", ".")
+    return all(tok.strip().lower() in label for tok in match.split("&") if tok.strip())
+
+
+def shop_price(page: str, url: str, match: str) -> float | None:
+    """Price incl. VAT of the configuration whose label contains every
+    `&`-separated token of `match` (lowest if several), for the shops whose
+    page structure we know: thuisbatterij.nl (WooCommerce variations) and
+    123accu.nl (product blocks)."""
+    import html as htmllib
+    prices = []
+    if "thuisbatterij.nl" in url:
+        m = re.search(r'data-product_variations="([^"]*)"', page)
+        if m:
+            for v in json.loads(htmllib.unescape(m.group(1))) or []:
+                label = " ".join(str(x).replace("-", " ") for x in v.get("attributes", {}).values())
+                if _match(label, match) and v.get("is_in_stock", True):
+                    prices.append(float(v["display_price"]))
+    elif "123accu.nl" in url:
+        text = htmllib.unescape(re.sub(r"<[^>]+>", "\n", re.sub(r"<script.*?</script>|<style.*?</style>", "", page, flags=re.S)))
+        lines = [l.replace("\xa0", " ").strip() for l in text.splitlines() if l.strip()]
+        name = ""
+        for i, l in enumerate(lines):
+            if re.search(r"kWh (plug-in thuisbatterij|thuisbatterij set|uitbreidingsbatterij)|Basismodule\)", l) and len(l) < 110:
+                name = l
+            if l.startswith("€") and i + 2 < len(lines) and lines[i + 1].startswith("€") and "Exclusief" in lines[i + 2]:
+                if _match(name or lines[0], match):
+                    prices.append(eur(l.replace("€", "")))
+                name = ""
+    else:
+        p = find_price(page)
+        return p
+    return min(prices) if prices else None
+
+
 def scrape_battery_prices(cfg: dict) -> str:
-    """Updates price columns for batteries that have a `tweakers_url`
-    (NL, incl. VAT) and/or `idealo_url` (DE). Tracks the lowest NL price seen."""
+    """Updates `price_nl_incl_vat` from the shop pages in `shop_urls`
+    (`url|match` entries separated by spaces; the lowest price wins) and the
+    optional `tweakers_url`, `price_de_excl_vat` from `idealo_url`, and tracks
+    the lowest NL price seen."""
     path = resolve(cfg, cfg["paths"]["batteries_file"])
     df = pd.read_csv(path, dtype=str).fillna("")
-    for col in ("tweakers_url", "idealo_url"):
+    for col in ("tweakers_url", "idealo_url", "shop_urls"):
         if col not in df.columns:
             df[col] = ""
-    n = 0
-    errors = []
+    n, errors, cache = 0, [], {}
+
+    def get(url):
+        if url not in cache:
+            cache[url] = fetch(url)
+        return cache[url]
+
     for i, r in df.iterrows():
+        found = []
+        for entry in r["shop_urls"].split():
+            url, _, match = entry.partition("|")
+            try:
+                p = shop_price(get(url), url, match.replace("_", " "))
+                if p:
+                    found.append((p, url))
+                else:
+                    errors.append(f"{r['id']}: no price matching '{match}' on {url}")
+            except Exception as e:
+                errors.append(f"{r['id']} {url}: {e}")
         if r["tweakers_url"]:
             try:
-                p = find_price(fetch(r["tweakers_url"]))
+                p = find_price(get(r["tweakers_url"]))
                 if p:
-                    df.at[i, "price_nl_incl_vat"] = f"{p:.2f}"
-                    low = float(r["price_nl_lowest_incl_vat"]) if r["price_nl_lowest_incl_vat"] else None
-                    if low is None or p < low:
-                        df.at[i, "price_nl_lowest_incl_vat"] = f"{p:.2f}"
-                        df.at[i, "price_nl_lowest_date"] = TODAY
-                    df.at[i, "retrieved_at"] = TODAY
-                    n += 1
+                    found.append((p, r["tweakers_url"]))
             except Exception as e:
                 errors.append(f"{r['id']} tweakers: {e}")
+        if found:
+            p, url = min(found)
+            df.at[i, "price_nl_incl_vat"] = f"{p:.2f}"
+            df.at[i, "source_url"] = url
+            low = float(r["price_nl_lowest_incl_vat"]) if r["price_nl_lowest_incl_vat"] else None
+            if low is None or p < low:
+                df.at[i, "price_nl_lowest_incl_vat"] = f"{p:.2f}"
+                df.at[i, "price_nl_lowest_date"] = TODAY
+            df.at[i, "retrieved_at"] = TODAY
+            n += 1
         if r["idealo_url"]:
             try:
-                p = find_price(fetch(r["idealo_url"]))
+                p = find_price(get(r["idealo_url"]))
                 if p:
                     df.at[i, "price_de_excl_vat"] = f"{p:.2f}"
-                    n += 1
             except Exception as e:
                 errors.append(f"{r['id']} idealo: {e}")
     if n:
         df.to_csv(path, index=False)
-    return f"{n} prices updated" + (f"; errors: {'; '.join(errors)}" if errors else "")
+    return f"{n} batteries priced" + (f"; errors: {'; '.join(errors)}" if errors else "")
 
 
 SCRAPERS = {"prices": scrape_dayahead, "taxes": scrape_taxes, "batteries": scrape_battery_prices}

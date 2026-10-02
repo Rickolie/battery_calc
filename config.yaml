@@ -127,7 +127,7 @@ analysis:
   purchase_date: '2026-10-02'
   discount_rate: 0.03
   horizon_years: 20
-  payback_top_dynamic_contracts: 3   # battery runs on the cheapest N dynamic contracts
+  payback_top_dynamic_contracts: 1   # battery runs on the cheapest N dynamic contracts (they differ only in markup)
 
 battery_defaults:
   rte: 0.85
@@ -135,7 +135,7 @@ battery_defaults:
   cycle_life: 6000
   eol_capacity: 0.70
   warranty_years: 10
-  dod: 1.0
+  dod: 0.9                       # used when DoD and usable capacity are not stated
   min_soc_pct: 0.0
   residual_value: 0.0
   cycles_per_year: 250

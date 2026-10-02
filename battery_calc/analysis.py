@@ -490,6 +490,8 @@ class Analysis:
                          "eol_capacity": b.eol_capacity, "warranty_years": b.warranty_years,
                          "warranty_mwh": b.warranty_mwh, "price_nl": b.price_nl, "price_nl_lowest": b.price_nl_lowest,
                          "price_de": b.price_de, "extra_hw": b.extra_hardware,
+                         "eur_per_kwh_nominal": round(b.price_nl / b.nominal_kwh) if b.price_nl and b.nominal_kwh else None,
+                         "eur_per_kwh_usable": round(b.price_nl / b.usable_kwh) if b.price_nl and b.usable_kwh else None,
                          "missing_fields": ", ".join(b.missing_fields), "estimated_with_defaults": ", ".join(b.estimated_fields),
                          "verified": "yes" if b.verified else "no", "in_scope": "yes" if ok else "no", "note": note})
         sec.tables["battery_specs"] = pd.DataFrame(rows)
@@ -840,6 +842,7 @@ class Analysis:
                                                     self.cfg)["payback_years"])
                     ranked.append({"battery": b.name, "usable_kwh": round(b.usable_kwh, 2), "contract": c.label,
                                    "strategy": strat, "analysis": aname, "price_variant": vname, "price_eur": price,
+                                   "eur_per_kwh_usable": round(price / b.usable_kwh) if b.usable_kwh else None,
                                    "payback_years": pb["payback_years"],
                                    "payback_min": min(per_year) if per_year else pb["payback_years"],
                                    "payback_max": max(per_year) if per_year else pb["payback_years"],
