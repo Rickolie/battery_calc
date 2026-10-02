@@ -127,6 +127,7 @@ analysis:
   purchase_date: '2026-10-02'
   discount_rate: 0.03
   horizon_years: 20
+  payback_top_dynamic_contracts: 3   # battery runs on the cheapest N dynamic contracts
 
 battery_defaults:
   rte: 0.85

@@ -362,6 +362,7 @@ class Analysis:
             total += expected.get(scn, np.nan) * frac
             t = seg_end
         years = (end - start).days / 365.0
+        total -= c.welcome_bonus
         return total / years if years else np.nan
 
     def step_contracts(self):
@@ -389,12 +390,15 @@ class Analysis:
                             continue
                     else:
                         sel = costs
-                    tot = np.array([v[0].total for v in sel.values()])
-                    real = np.array([v[1].total for v in sel.values()])
+                    # The switch bonus is one-off: yearly figures exclude it; it is counted
+                    # once in the cost over the contract term.
+                    tot = np.array([v[0].total - v[0].bonus_amortised for v in sel.values()])
+                    real = np.array([v[1].total - v[1].bonus_amortised for v in sel.values()])
                     imp = np.array([v[0].import_kwh for v in sel.values()])
                     inc = np.array([v[0].feed_in_income for v in sel.values()])
                     row = {"contract": c.label, "type": c.type, "verified": "yes" if c.verified else "no",
                            "expected_eur_year": tot.mean(), "min": tot.min(), "max": tot.max(),
+                           "switch_bonus_eur_once": c.welcome_bonus,
                            "eur_per_kwh_imported": (tot / np.maximum(imp, 1e-9)).mean(),
                            "feed_in_income": inc.mean(), "real_months_only": real.mean(),
                            "price_years": ",".join(str(k) for k in sel) if c.is_dynamic else "stated tariffs"}
@@ -455,7 +459,7 @@ class Analysis:
         md.append("Fixed contracts use their stated tariffs (one value per scenario); dynamic contracts are replayed "
                   "against every price year under the scenario's rules. `real_months_only` excludes synthetic months. "
                   "`avg_eur_year_over_term` spreads the cost over the contract term from the purchase date, "
-                  "switching rules on 1 January 2027.")
+                  "switching rules on 1 January 2027, and subtracts the one-off switch bonus once. Yearly figures exclude the bonus.")
         sec.md = "\n".join(md)
         self.expected_by_contract = expected_by_contract
         self.emit(sec)
@@ -691,6 +695,19 @@ class Analysis:
             self.emit(sec)
             return
         contracts = [c for c in self.contracts if not c.is_dynamic or (self.prices is not None and self.full_years)]
+        # Dynamic contracts differ only in markup and fixed costs, so battery runs use the
+        # cheapest few (2027-2029 rules, last 3 years, without switch bonus).
+        top_n = int(self.cfg.get("analysis", {}).get("payback_top_dynamic_contracts", 3))
+        dyn = [c for c in contracts if c.is_dynamic]
+        if len(dyn) > top_n:
+            def key(c):
+                costs = self.contract_year_costs(c, "nosal_min50")
+                v = [x[0].total - x[0].bonus_amortised for y, x in costs.items() if y in self.head_years]
+                return np.mean(v) if v else np.inf
+            keep = {c.id for c in sorted(dyn, key=key)[:top_n]}
+            contracts = [c for c in contracts if not c.is_dynamic or c.id in keep]
+            self.log(f"  battery runs on the {top_n} cheapest dynamic contracts: "
+                     + ", ".join(c.label for c in contracts if c.is_dynamic))
         if not contracts:
             sec.md = "No contract to simulate against."
             self.emit(sec)
