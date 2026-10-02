@@ -1,18 +1,327 @@
-Inputs given by me (in github repo)
-- csv file with energy data from house homewizzard p1 meter 15min. Energy_house.csv
-- CSV file with dynamic prices from last years. (see example dynamic_prices_energieknl.csv)
-- Current contract (vast) (vast.txt)
+# Spec: Energy contract & home battery payback analysis
 
-Inputs to retreive online:
-- new contracts dynamic prices options.
-- new contracts (vast)
-- List of dutch current available home battery systems. Both plugin and normal, but I can install myself so without installation costs but available to buy without an installer. Add specs like standbyy power usage, RTE, DoD, usable capacity, price with and without btw (tax), lowest price ever and current price (for example from tweakers), price in germany if possible (because of 0%tax). Cyclelife, power.
+As of 2026-10-02
 
-Assumptions:
-- The export is because of solar panels. Unfortunatelly I don’t have the production data at the moment. But please add the possibility in the program to add it as a csv. 
-- Check the changes in dutch policy and use in calculations.
+## 1. Purpose and scope
 
+The program answers two questions for one Dutch household with solar panels, using real 15-minute meter data:
 
-Objectives:
-- Calculate which contract is the best without a battery
-- Calculate which battery system is earned back the fastest with several strategies. Use the strategies from docs.homebatterycontrol.com/. Make sure to not forget to consider all the specs.
+1. Per battery: from what price does it make sense to sell stored energy to the grid (or use it at home), given losses and wear?
+2. Which electricity contract (fixed or dynamic) is cheapest without a battery, now and after saldering ends on 1 January 2027?
+3. Which home battery pays back fastest, under which control strategy and which contract?
+
+Out of scope: gas, heat pumps and EV charging optimisation (EV/heat-pump load is simply part of the measured consumption).
+
+Battery scope: any battery a consumer can buy online and install themselves, without an installer. Single-phase and three-phase systems are both in scope.
+
+## 2. Inputs from the repo
+
+All repo inputs live in `data/` and are loaded through one config file (`config.yaml`) so paths and column names are never hard-coded. The files below are Rick's data and the shared price history. In the web interface a visitor can replace the household files (P1, PV, fixed contract) with their own uploads (section 9); the price history and online data are always shared.
+
+| File | Required | Content | Notes |
+| --- | --- | --- | --- |
+| `Energy_house.csv` | Yes | HomeWizard P1 export, 15-min | Cumulative import/export counters per tariff (T1/T2). Convert to per-interval kWh deltas. |
+| `jeroen_punt_nl_dynamische_stroomprijzen_jaar_YYYY.csv` | Yes | Day-ahead price history, one file per year, 2013–2026 | Main price source. Hourly until Sept 2025, 15-min from Oct 2025. Loader detects whether a column is kale (EPEX) or incl. taxes. |
+| `dynamic_prices_energieknl.csv` | No | Day-ahead prices from energieKNL | Kept as cross-check for the overlapping period. |
+| `vast.txt` | Yes | Current fixed contract | Parse into the contract schema in section 3. |
+| `pv_production.csv` | No | Solar production, any interval ≤ 1 h | Optional. When present, enables true consumption and solar-forecast strategies. |
+
+**Validation the program must do on load:**
+
+- Convert all timestamps to Europe/Amsterdam and handle DST (the 23 h and 25 h days).
+- Detect gaps, duplicates and counter resets in the P1 data; report them and fill gaps up to 1 h by interpolation, longer gaps flagged and excluded.
+- Load all `jeroen_punt_nl_dynamische_stroomprijzen_jaar_*.csv` files by glob pattern, so adding a new year needs no code change. Concatenate, remove duplicates at year boundaries, and report missing hours per year. Column names or units (€/kWh vs €/MWh) may differ between years; normalise to €/kWh kale.
+- Compare the jeroen.nl and energieKNL prices where they overlap; flag differences above 0.1 ct/kWh.
+- Resample price data to 15 min (hourly price repeated per quarter) so it aligns with meter data. From October 2025 the day-ahead market itself is 15-minute, so newer files may already be 15-min.
+- Report the overlapping date range of meter and price data. The actual overlap is the validation run; all other price years are replayed against the meter profile (see section 5).
+
+**Without PV data:** the P1 meter only sees net flows. Import = consumption not covered by solar; export = solar surplus. That is enough for contract comparison and battery simulation, because a battery only ever sees these net flows. What is missing is gross consumption and self-consumption, which only matter for reporting and for the solar-forecast strategy.
+
+## 3. Inputs retrieved online
+
+Every retrieved record stores `source_url` and `retrieved_at`. Scrapers write to `data/online/*.csv`; the analysis reads only those files, so a failed scrape never silently changes results. Each dataset can also be edited by hand.
+
+### 3.1 Contracts (fixed and dynamic)
+
+One schema for both types, so they run through the same cost engine:
+
+| Field | Unit | Fixed | Dynamic |
+| --- | --- | --- | --- |
+| supplier, product name, duration | – | ✓ | ✓ |
+| delivery price (T1/T2 or single) | €/kWh incl. VAT | ✓ | – |
+| purchase markup (inkoopvergoeding) | €/kWh excl. VAT | – | ✓ |
+| fixed delivery costs (vaste leveringskosten) | €/month | ✓ | ✓ |
+| feed-in compensation (terugleververgoeding) | €/kWh or formula | ✓ | ✓ (spot ± markup) |
+| feed-in costs (terugleverkosten) | €/kWh or tiered €/month | ✓ | ✓ |
+| welcome bonus, cancellation fee | € | ✓ | ✓ |
+| post-2027 terms (if published) | as above | ✓ | ✓ |
+
+Sources to try: supplier tariff pages (Tibber, Frank Energie, ANWB, Zonneplan, NextEnergy, Vattenfall, Eneco, Essent, Budget Energie, Energie VanOns, energieKNL, etc.), comparison sites as cross-check. Grid operator costs (netbeheerkosten) are the same for every supplier and are configured once.
+
+### 3.2 Home batteries
+
+Scope: batteries that a consumer can buy online (NL or DE webshops) and install without an installer. This includes:
+
+- Plug-in batteries (e.g. Marstek Venus, Zendure, Anker Solix, EcoFlow, HomeWizard Plug-In Battery).
+- Single-phase and three-phase AC-coupled systems sold for self-installation, including systems wired to their own group in the meter cabinet.
+- Hybrid inverter + battery kits sold to consumers, where self-installation is allowed.
+
+Exclude only systems that are not sold to consumers without an installer, or whose warranty is void without certified installation. Record this as a field rather than silently dropping borderline cases.
+
+| Field | Unit | Why it matters |
+| --- | --- | --- |
+| brand, model, type (plug-in / fixed AC / hybrid) | – | Filtering |
+| phases (1 or 3) and connection (plug / own group / hybrid) | – | Power limits, extra hardware cost, filtering |
+| nominal and usable capacity | kWh | Usable = nominal × DoD unless stated |
+| depth of discharge (DoD) | % | Min/max SoC limits in simulation |
+| max charge / discharge power (AC) | W | Caps energy moved per 15 min; plug-in models typically capped at 800 W, three-phase systems often much higher |
+| round-trip efficiency (RTE, AC→AC) | % | Losses per cycle; split as √RTE each way |
+| standby consumption | W | Runs 8,760 h/yr; 10 W = 88 kWh/yr |
+| cycle life + end-of-life capacity | cycles @ % | Degradation and lifetime |
+| warranty | years and/or MWh throughput | Lifetime cap |
+| warranty valid with self-installation | yes/no | Scope filter |
+| expandable (max modules) | – | Sizing scenarios |
+| control interface (local API, Modbus, HA integration) | – | Recorded for information only; not used as a filter for now (see section 8) |
+| needs P1/CT meter | – | Extra cost |
+| price NL incl. / excl. VAT | € | Current price, Tweakers Pricewatch |
+| lowest price ever (NL) | € + date | Tweakers price history |
+| price DE (0% VAT) | € | idealo.de / geizhals.de; see section 4 on legality |
+| extra hardware cost | € | Meter, cabling, group/fuse, three-phase breaker |
+
+Missing specs are left empty and flagged, never guessed. The payback run uses a documented default (e.g. RTE 85%, standby 10 W) and marks that battery's result as "estimated".
+
+## 4. Dutch policy and tax assumptions
+
+The single biggest driver is the end of saldering: [net metering stops in one go on 1 January 2027](https://www.njb.nl/wetgeving/staatsbladen/einde-salderingsregeling/). Every calculation must therefore run in two regimes and show both.
+
+| Rule | Until 31-12-2026 | From 1-1-2027 |
+| --- | --- | --- |
+| Saldering | Export netted against import, incl. energy tax and VAT, per year | Abolished |
+| Feed-in compensation | Supplier-defined | Minimum 50% of the kale delivery price until 1-1-2030 ([Staatsblad 2025, 17](https://www.njb.nl/wetgeving/staatsbladen/einde-salderingsregeling/)) |
+| Feed-in costs | Allowed, supplier-defined | Allowed, but net payment for export may not go below zero ([Gaslicht](https://www.gaslicht.com/blog/salderingsregeling-afgeschaft-gevolgen/)) |
+| Fixed contract changed because of the law | – | Free to cancel ([AVROTROS Radar](https://radar.avrotros.nl/artikel/nieuwe-regels-voor-salderen-dit-verandert-voor-jouw-zonnepanelen-61174)) |
+| 2030 onwards | – | Minimum lapses; model with a configurable % (default 0%, sensitivity 30%) |
+
+**Taxes and fixed charges (configurable per year, with source URL):** energy tax per kWh, ODE (now merged into energy tax), the yearly tax reduction (vermindering energiebelasting), VAT 21%, and grid operator charges, looked up per connection size so they follow the `--connection` choice (connections up to 3x25 A share one tariff category; larger ones cost more). The program fetches current values from Belastingdienst at run time where possible and otherwise uses the config, never values baked into code. For years after the latest published rates, hold rates flat and let the user set an escalation %.
+
+**Battery VAT:** batteries are taxed at 21% in NL; the 0% rate applies to solar panels only.
+
+**Buying in Germany (0% VAT):** Germany's 0% rate covers storage delivered for PV systems at or near residential buildings. For an NL buyer two cases differ: a German seller shipping to NL normally charges Dutch VAT (distance-selling rules), while collecting in Germany yourself may qualify for 0%, though whether it applies to a home abroad is unclear. The program shows the DE price as a scenario only, adds a configurable travel/shipping cost, and flags warranty region restrictions. This needs verification before relying on it.
+
+**Possible future changes to watch** (scenario flags, off by default): time-dependent or capacity-based grid tariffs for households, changes to energy tax rates, and the 2030 evaluation of the feed-in minimum.
+
+## 5. Simulation model
+
+The model steps through every 15-minute interval. One cost engine is shared by the contract comparison and the battery runs; the battery only changes the import and export per interval.
+
+**Per-interval battery physics:**
+
+- State of charge stays between `min_soc` and `max_soc` (from DoD and the strategy's own floor).
+- Energy moved per interval ≤ power limit × 0.25 h, separately for charge and discharge.
+- Efficiency: charging stores `E × √RTE`, discharging delivers `E × √RTE` (configurable split if the datasheet gives separate values).
+- Standby draw is added to import every interval, also when the battery is idle or full.
+- Degradation: usable capacity falls linearly with equivalent full cycles towards the end-of-life capacity; the battery is retired at cycle life, warranty throughput or warranty years, whichever comes first.
+- Plug-in batteries cannot export through the meter faster than their AC limit and only see the house's net flow (no separate PV input), which the model respects.
+- Phases: Dutch smart meters net import and export across all three phases, so costs are computed on the summed net flow. A single-phase battery can therefore offset load on any phase. Phase count only affects the power limit, extra hardware cost and fuse/group constraints.
+- Connection limit: the grid connection is chosen on the command line with `--connection` or in the web interface's connection dropdown, in the form `<phases>x<amps>` (e.g. `1x25`, `1x35`, `3x25`, `3x35`). Default `3x25`, also settable in `config.yaml`; the CLI or web value wins. Per-phase capacity = amps × 230 V (3x25 gives about 5.75 kW per phase, 17.25 kW total). A single-phase battery's charge/discharge power is capped at the per-phase capacity minus a safety margin (`--connection-margin`, default 20%, so 4.6 kW at 25 A). A three-phase battery is capped at the same per-phase limit on each phase. On a single-phase connection, three-phase batteries are excluded from the results with a note. The chosen connection is printed at the top of every report. Because the P1 data is the sum of all phases, per-phase household load is unknown; the cap is applied as a fixed limit, not per interval.
+
+**Cost per interval, before saldering:**
+
+```
+C_t = I_t × (p_t + m + EB + grid_var) × (1 + VAT) − X_t × r_t + F_t
+```
+
+where I = import kWh, X = export kWh, p = kale price (fixed or spot), m = supplier markup, EB = energy tax, r = feed-in compensation net of feed-in costs, F = the interval's share of fixed charges.
+
+**Saldering (until 2026):** netting is done on yearly totals, not per interval: tax and VAT are charged on max(0, total import − total export), and only the export surplus gets the feed-in price. For dynamic contracts, follow each supplier's actual netting method (most net the kWh and settle at the hourly price); record the method per contract.
+
+**Missing months in the P1 data:** Rick's meter file has no October, and uploaded files may miss other months. The program fills every missing calendar month with a synthetic month so yearly totals stay comparable (described here for October):
+
+- Build an average profile per weekday and quarter-hour from the last two weeks of September and the first two weeks of November, separately for import and export.
+- Blend linearly across the month (September-weighted at the start, November-weighted at the end), because solar export drops quickly in autumn.
+- Mark every synthetic interval with a flag. Reports show yearly results with the synthetic October and, as a check, the 11 real months only.
+- If PV production data or a later P1 export with October becomes available, the real data replaces the synthetic month automatically.
+- Same method for any missing month, using the two weeks either side of it. If more than 3 months are missing the result is marked low-confidence; with less than 1 month of real data the program stops with a clear message.
+
+**Replaying price years against the meter profile:** the meter data covers fewer years than the price history. To test a price year, map each meter interval to the same weekday and quarter-hour in the same calendar week of the price year (leap days dropped or duplicated). Only spot prices come from history; markups, taxes and feed-in rules come from the scenario being run, so 2013 prices are evaluated under 2026 or 2027 rules. Seasonal consumption and solar export stay matched to the season of the prices.
+
+**Per-interval vs per-year:** dynamic contracts are settled per interval at spot price; fixed contracts per tariff block (T1/T2) per month or year, as their terms state.
+
+## 6. Objective 1: break-even sell price per battery
+
+This runs first, from the battery specs alone, and its results feed the battery strategies in Objective 3. For each battery it gives the price at which discharging is worth more than the losses and wear it costs.
+
+**Wear cost per kWh delivered:**
+
+```
+lifetime_kWh = min(
+    cycle_life × usable_kWh × (1 + EoL_capacity) / 2,     # cycles, with average capacity over life
+    warranty_throughput_kWh,                               # if the warranty caps throughput
+    cycles_per_year × calendar_life_years × usable_kWh × (1 + EoL_capacity) / 2
+) × √RTE                                                   # kWh actually delivered at the AC side
+
+wear_cost = (purchase_price + extra_hardware − residual_value) / lifetime_kWh     [€/kWh]
+```
+
+- `calendar_life_years` = warranty years by default (configurable, e.g. 15). The calendar term matters: a battery that cycles rarely ages before it reaches its cycle life, which raises the cost per kWh.
+- `cycles_per_year` starts at a configurable default (250). After the Objective 3 simulation, it is replaced by the simulated value for that battery and strategy, and the break-even is recomputed once.
+- `residual_value` defaults to 0.
+- Calculated for each price variant: NL current, NL lowest-ever, DE (0% VAT scenario).
+
+**Break-even prices per stored kWh:**
+
+```
+cost_of_stored_kWh = charge_price / RTE + wear_cost
+
+sell to grid  when  net_feed_in_price ≥ cost_of_stored_kWh
+use at home   when  all_in_import_price ≥ cost_of_stored_kWh
+```
+
+- `charge_price` depends on where the energy came from. From the grid: the all-in import price for that interval (spot + markup + energy tax + VAT). From solar surplus: the feed-in price that was given up by storing instead of exporting.
+- `net_feed_in_price` = feed-in compensation − feed-in costs, under the rules of the scenario year (section 4). Under saldering (until 2026) selling and using at home are worth the same, so only one break-even applies.
+- Standby use is a fixed cost that occurs whether the battery cycles or not, so it is left out of the per-kWh break-even. It is reported separately as €/year and counted in Objective 3.
+
+**Output:**
+
+- A table per battery: wear cost (€/kWh), RTE, lifetime kWh and which limit sets it (cycles, warranty throughput or calendar life), and break-even sell prices for three example charge sources: grid at 0 €/kWh, grid at the average all-in price, and own solar.
+- A chart of break-even sell price against charge price for the top batteries, showing the minimum spread each one needs.
+- The per-battery break-even values are written to `results/breakeven.csv` and read by the Dynamic, Sell and Timed strategies in Objective 3.
+
+## 7. Objective 2: best contract without a battery
+
+Rank every contract (current `vast.txt` + all retrieved) by total yearly cost on the measured profile, in three scenarios:
+
+1. **2026 rules** (saldering active).
+2. **2027–2029 rules** (no saldering, 50% feed-in minimum).
+3. **2030+ rules** (no minimum; configurable).
+
+**Price data for future years:** dynamic contracts are replayed against every price year, each separately, so the result shows a range rather than one guess. Fixed contracts use their stated tariffs. Every result is reported for two analyses:
+
+1. **Full history:** all price years 2013–2026.
+2. **Last 3 years:** the three most recent full calendar years (2023–2025). This is the headline result, because it best reflects the current market.
+
+Within the full-history analysis, results are also broken down per group, because price years differ in character:
+
+| Group | Years | Character |
+| --- | --- | --- |
+| Pre-crisis | 2013–2020 | Low prices, small daily spreads, few negative prices |
+| Crisis | 2021–2022 | Very high, volatile prices |
+| Recent | 2023–2026 | Solar-driven midday dips, more negative prices, larger spreads |
+
+2026 is a partial year and is marked as such; it is used for its months only, never scaled to a full year. The year sets for both analyses are configurable in `config.yaml`.
+
+**Contract duration matters:** a 1-, 2- or 3-year fixed contract signed now runs into 2027. Compute cost over the contract's actual term, splitting each year by the applicable rules, and include cancellation fees and welcome bonuses spread over the term.
+
+**Output:** a table per scenario with yearly cost, cost per kWh imported, feed-in income, and difference vs the current contract, showing the expected value and the min–max across price years; plus a chart of yearly cost per price year for the top 3 dynamic contracts against the best fixed contract.
+
+## 8. Objective 3: battery payback per strategy
+
+For every battery × strategy × contract combination, simulate the battery and compare against the same contract without a battery. Savings = cost without battery − cost with battery (standby and losses included automatically).
+
+**Strategies to implement**, taken from [Home Battery Control](https://docs.homebatterycontrol.com/03-strategies). Only strategies that can save money are simulated; Full stop serves as the zero-battery baseline.
+
+| Strategy | What it does | Simulation rule | Needs |
+| --- | --- | --- | --- |
+| Self-consumption | Keeps grid near 0 W | Charge from export, discharge to cover import | – |
+| Zero import | Covers load, never charges | Discharge only; useful as Dynamic sub-strategy | – |
+| Charge PV | Stores surplus only, never discharges | Combined with another mode to be useful | – |
+| Timed | Up to 5 fixed daily windows | Windows configurable; search best windows on history | – |
+| Dynamic | Cheapest intervals → charge, most expensive → discharge or sell, only if spread > minimum delta | Per-day optimisation on day-ahead prices; sub-strategy per Low/Neutral/High period configurable | Dynamic contract |
+| Charge (to goal) | Charge from grid to a target | Part of Dynamic/Timed; solar-forecast goal only if PV data present | PV data for forecast goal |
+| Sell | Discharge to grid at peaks | Part of Dynamic High period | Dynamic contract |
+| Standby / peak shave | Acts only above an import/export limit | Only valuable with a capacity tariff; scenario flag | Capacity tariff |
+
+**Control assumption:** for now every battery is simulated as fully controllable with all strategies, regardless of its control interface. Home Assistant and vendor-app limitations are out of scope in this version.
+
+**Dynamic strategy details:** charge, discharge and sell decisions use the battery's own break-even prices from Objective 1 (section 6), not one fixed delta for all batteries. An interval pair is only used when it clears the break-even. Also report a variant with the break-even scaled by 0.5–1.5 to find the best threshold per battery. Use only prices known at decision time (day-ahead, published ~13:00) to avoid perfect foresight; also report a perfect-foresight upper bound.
+
+**Payback metrics per combination:**
+
+- Simple payback (years) = purchase price (incl. extra hardware) ÷ yearly savings, using the savings path across the 2026 and post-2027 regimes year by year, not one average year.
+- Net present value over lifetime (configurable discount rate, default 3%) and lifetime net saving.
+- Equivalent full cycles per year and projected end-of-life year.
+- Run for each price variant: NL current, NL lowest-ever, DE (0% VAT scenario).
+- Run against every price year 2013–2026. Payback is reported for both analyses: last 3 years (headline) and full history 2013–2026, each with the min–max across its years.
+
+**Output:** a ranked table (fastest payback first) of the top combinations, plus a payback-vs-capacity scatter chart to show where extra kWh stop paying off. Sensitivity: price year (replaces a fixed ±% spread assumption, since 13 real years give the spread range), RTE ±5 points, standby ×2. Also chart yearly savings per price year for the top 3 batteries, to show how much Dynamic depends on the market.
+
+## 9. Web interface on GitHub Pages
+
+The analysis also runs as a static website on GitHub Pages, from the same repo. Everything runs in the visitor's browser: there is no server, and uploaded files never leave their computer.
+
+**Architecture:**
+
+- The analysis core stays one Python package. The website runs it in the browser with Pyodide, so the CLI and the website always give the same results from the same code.
+- The website is plain HTML/JavaScript in `web/`, published by a GitHub Actions workflow on every push to `main`.
+- Online data can't be scraped from the browser (sites block cross-origin requests). A scheduled GitHub Actions workflow (weekly, plus manual trigger) runs the scrapers, commits `data/online/*.csv`, and the website loads those files. The page shows the date of the last update.
+- Price history files (`jeroen_punt_nl_dynamische_stroomprijzen_jaar_*.csv`) are served from the repo; the workflow writes a `data/manifest.json` listing all available files so the site finds new years automatically.
+
+**Step 1 — whose data?** The first screen asks one question with two choices:
+
+1. **Use Rick's data** — loads the P1 file, fixed contract and (if present) PV file from the repo, and goes straight to the settings step.
+2. **Use my own data** — opens the upload step.
+
+**Step 2 — upload (own data only):**
+
+| Input | Required | Format |
+| --- | --- | --- |
+| P1 meter data | Yes | HomeWizard P1 CSV export, 15-min. Other P1 formats can be added later via a column-mapping screen. |
+| Solar production | No | CSV, any interval ≤ 1 h |
+| Current fixed contract | No | Form fields matching the contract schema (section 3.1), instead of `vast.txt`. If left empty, the current contract is left out of the comparison. |
+
+Each upload is validated straight away using the checks in section 2, and the result is shown before continuing: date range, missing months (and that they will be filled), gaps, yearly import and export. A downloadable example file shows the expected format.
+
+**Step 3 — settings:** connection (dropdown: 1x25, 1x35, 1x40, 3x25, 3x35, 3x40, 3x50, 3x63 A; default 3x25), connection margin, VAT/price variant, and the scenario choices that the CLI exposes as options.
+
+**Step 4 — results:** the same tables and charts as the CLI report (sections 6, 7 and 8), each section appearing as soon as it is computed, so the visitor sees progress. Results can be downloaded as a Markdown or HTML report and as CSV.
+
+**Privacy:**
+
+- Uploaded data stays in the browser; nothing is sent anywhere. The page says so on the upload step.
+- Rick's data is published with the site: with a public repo, anyone can see and download it. Before going live, decide whether that is acceptable or whether Rick's files should be kept out of the public site (see open questions).
+
+## 10. Workflow, outputs and open questions
+
+Build in steps, each producing visible output before the next starts:
+
+1. Load and validate data → data-quality report + yearly/monthly import/export chart + price history overview per year (average price, average daily max–min spread, number of negative-price hours).
+2. Contract schema + current contract → current yearly cost, checked against a real energy bill.
+3. Online contracts → Objective 2 tables.
+4. Battery dataset → spec table with missing fields flagged.
+5. Break-even prices per battery → Objective 1 table and chart (before any simulation).
+6. Self-consumption simulation for one battery → sanity check (cycles, SoC plot for one summer and one winter week).
+7. All strategies and batteries → Objective 3 ranking and sensitivity, then recompute Objective 1 with the simulated cycles per year.
+8. Optional PV CSV → gross consumption and solar-forecast Charge goal.
+9. GitHub Actions: scheduled scraper workflow + Pages deploy.
+10. Web interface: data choice and upload step first (validation output visible), then settings and results, reusing the core via Pyodide.
+
+**Acceptance criteria:**
+
+- [ ] Current-contract cost from the model is within 3% of an actual annual bill.
+- [ ] Energy balance closes every interval: import − export = consumption − PV ± battery flow.
+- [ ] A battery with RTE 100%, standby 0 W and zero price spread gives zero savings under Dynamic.
+- [ ] Every number in an output table traces to a source file or URL with a date.
+- [ ] All results shown for both pre- and post-2027 rules.
+- [ ] A battery with RTE 100% and infinite cycle life gives a break-even sell price equal to its charge price.
+- [ ] For each battery the report shows which limit (cycles, warranty throughput, calendar life) sets its lifetime kWh.
+- [ ] Running with `--connection 1x35` and `--connection 3x25` changes battery power caps and filters three-phase batteries on the single-phase run.
+- [ ] All results shown for both price-year analyses (2013–2026 and 2023–2025).
+- [ ] Synthetic October is flagged, and the 11-real-months check is shown next to every yearly total.
+- [ ] The website and the CLI give identical results for Rick's data with the same settings.
+- [ ] Uploading the example P1 file in the website runs the full analysis without network requests beyond the site's own files.
+- [ ] A P1 upload with a missing month shows the gap in the validation step and fills it.
+
+**Deliverables:** Python package with CLI (including `--connection` and `--connection-margin`), `config.yaml`, cached online data, an HTML or Markdown report per run, a static web interface in `web/` deployed to GitHub Pages, and GitHub Actions workflows for deploy and scheduled scraping.
+
+**Decisions (answered open questions):**
+
+- Connection: chosen in the CLI with `--connection` or in the web dropdown (default `3x25`), used as the battery power cap (section 5).
+- Runs as a CLI and as a static website on GitHub Pages; the website first asks whether to use Rick's data or upload your own (section 9).
+- P1 data misses October; filled with a synthetic month (section 5).
+- Price years: two analyses, full history 2013–2026 and last 3 full years 2023–2025 (section 7).
+- Home Assistant and battery control interfaces are ignored for now; all batteries are simulated with all strategies (section 8).
+
+**Open questions:**
+
+- Budget ceiling or maximum capacity to consider?
+- Is the repo public? If so, is it fine that Rick's P1 data is downloadable from the site, or should the "Rick's data" option load from a private source?
