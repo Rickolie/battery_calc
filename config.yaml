@@ -148,6 +148,13 @@ strategies:
     # charge_pv in Low periods holds stored energy for later; on the measured
     # profile that spills solar surplus, so self_consumption is the default.
     sub_strategy: {low: self_consumption, neutral: self_consumption, high: self_consumption}
+    # Reserve stored energy for the day's priciest load (persistence load
+    # forecast): discharge only in the most expensive intervals covering
+    # reserve_factor x battery energy. Skipped on days expecting at least
+    # reserve_skip_solar_frac x capacity of solar surplus. Tuned on 2023-2025.
+    reserve_factor: 1.5
+    reserve_skip_solar_frac: 1.0
+    reserve_min_spread: 0.01
     breakeven_scales: [0.5, 0.75, 1.0, 1.25, 1.5]
   timed:
     window_hours: 3

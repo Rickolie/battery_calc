@@ -626,7 +626,7 @@ class Analysis:
         if strategy in ("dynamic", "dynamic_sell"):
             modes = plan_dynamic(idx, u, s, bb, cap, wear, scale, strategy == "dynamic_sell",
                                  self.cfg.get("strategies", {}).get("dynamic", {}), export=per.exp,
-                                 solar_forecast=self.pv_for(idx))
+                                 solar_forecast=self.pv_for(idx), imports=per.imp)
             return simulate(net, modes, bb, cap)
         if strategy == "perfect_foresight":
             lv = self.cfg.get("strategies", {}).get("perfect_foresight", {}).get("soc_levels", 21)

@@ -10,7 +10,14 @@ import numpy as np
 import pandas as pd
 
 
-def _fmt(v):
+YEAR_COLS = {"year", "jaar", "price_year", "maand"}
+
+
+def _fmt(v, col=""):
+    if str(col).lower() in YEAR_COLS and isinstance(v, (int, float, np.integer, np.floating)) and not pd.isna(v):
+        return str(int(v))
+    if isinstance(v, (int, np.integer)):
+        return f"{v:,}"
     if isinstance(v, float):
         if np.isnan(v):
             return ""
@@ -28,8 +35,8 @@ def table_md(df: pd.DataFrame, max_rows: int = 60) -> str:
         d = d.reset_index()
     cols = [c for c in d.columns if not str(c).startswith("_")]
     lines = ["| " + " | ".join(str(c) for c in cols) + " |", "| " + " | ".join("---" for _ in cols) + " |"]
-    for _, r in d.iterrows():
-        lines.append("| " + " | ".join(_fmt(r[c]).replace("|", "/") for c in cols) + " |")
+    for r in d.to_dict("records"):
+        lines.append("| " + " | ".join(_fmt(r[c], c).replace("|", "/") for c in cols) + " |")
     if len(df) > max_rows:
         lines.append(f"\n_{len(df) - max_rows} more rows in the CSV._")
     return "\n".join(lines)
@@ -43,8 +50,8 @@ def table_html(df: pd.DataFrame, max_rows: int = 60) -> str:
         d = d.reset_index()
     cols = [c for c in d.columns if not str(c).startswith("_")]
     out = ["<div class='tbl'><table><thead><tr>" + "".join(f"<th>{html.escape(str(c))}</th>" for c in cols) + "</tr></thead><tbody>"]
-    for _, r in d.iterrows():
-        out.append("<tr>" + "".join(f"<td>{html.escape(_fmt(r[c]))}</td>" for c in cols) + "</tr>")
+    for r in d.to_dict("records"):
+        out.append("<tr>" + "".join(f"<td>{html.escape(_fmt(r[c], c))}</td>" for c in cols) + "</tr>")
     out.append("</tbody></table></div>")
     return "".join(out)
 

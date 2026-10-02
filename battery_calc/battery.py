@@ -260,14 +260,20 @@ def plan_timed(index: pd.DatetimeIndex, windows: list[tuple[int, int, int]], bas
 def plan_dynamic(index: pd.DatetimeIndex, u: np.ndarray, s: np.ndarray, b: Battery, power_cap_w: float,
                  wear: float, scale: float = 1.0, sell: bool = False, cfg: dict | None = None,
                  rte: float | None = None, export: np.ndarray | None = None,
-                 solar_forecast: np.ndarray | None = None) -> np.ndarray:
+                 solar_forecast: np.ndarray | None = None, imports: np.ndarray | None = None) -> np.ndarray:
     """Per-day plan from the day's own day-ahead prices (known the day before):
     pair the cheapest intervals (charge) with the most expensive (discharge or
     sell) only while the spread clears the battery's break-even.
 
     Grid charging leaves room for expected solar surplus: by default a
     persistence forecast (yesterday's export), or `solar_forecast` (kWh per
-    interval, e.g. from PV data) when given."""
+    interval, e.g. from PV data) when given.
+
+    With `imports` given, stored energy is reserved for the day's most
+    expensive load: self-consumption discharge is only allowed in the
+    priciest intervals whose forecast load (yesterday's import, a persistence
+    forecast) adds up to the battery's energy; elsewhere the battery holds
+    (still absorbing solar surplus)."""
     cfg = cfg or {}
     rte = b.rte if rte is None else rte
     eta = math.sqrt(rte)
@@ -287,6 +293,9 @@ def plan_dynamic(index: pd.DatetimeIndex, u: np.ndarray, s: np.ndarray, b: Batte
     starts = np.concatenate([[0], bounds])
     ends = np.concatenate([bounds, [len(index)]])
     prev_surplus = 0.0
+    prev_load = None
+    reserve = float(cfg.get("reserve_factor", 1.5))
+    min_spread = float(cfg.get("reserve_min_spread", 0.01))
     for a, z in zip(starts, ends):
         uu, ss = u[a:z], s[a:z]
         if len(uu) == 0:
@@ -326,6 +335,19 @@ def plan_dynamic(index: pd.DatetimeIndex, u: np.ndarray, s: np.ndarray, b: Batte
                 # Without selling, a planned discharge covers the load and still
                 # absorbs any solar surplus (self-consumption behaviour).
                 seg[d] = FULL_DISCHARGE if (sell and ss[d] >= basis) else SELF
+        if imports is not None:
+            today = np.asarray(imports[a:z], dtype=float)
+            sunny = expected * eta >= float(cfg.get("reserve_skip_solar_frac", 1.0)) * b.usable_kwh
+            if prev_load is not None and reserve > 0 and not sunny and uu.max() - uu.min() >= min_spread:
+                fc = np.resize(prev_load, len(uu)) if len(prev_load) != len(uu) else prev_load
+                order = np.argsort(-uu, kind="stable")
+                cum = np.cumsum(fc[order])
+                k = int(np.searchsorted(cum, reserve * b.usable_kwh * eta)) + 1
+                allowed = np.zeros(len(uu), bool)
+                allowed[order[:k]] = True
+                hold = (seg == SELF) & ~allowed
+                seg[hold] = CHARGE_PV
+            prev_load = today
         modes[a:z] = seg
     return modes
 

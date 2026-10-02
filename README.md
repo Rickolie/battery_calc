@@ -39,7 +39,7 @@ All paths, column names and tariffs live in `config.yaml`.
 | --- | --- |
 | `data/Energy_house.csv` | HomeWizard P1 export, 2025-11-01 → 2026-10-01. No gaps, duplicates or resets. October 2025 is filled synthetically and flagged. |
 | `data/vast.txt` | Current fixed contract, parsed from the "Exclusief btw" section. |
-| `data/jeroen_punt_nl_dynamische_stroomprijzen_jaar_YYYY.csv` | **Not in the repo yet.** Add one file per year; the loader picks them up by glob and detects separators, €/MWh vs €/kWh and kale vs incl. taxes. Without them, dynamic contracts and the Dynamic/Sell strategies are skipped. |
+| `data/jeroen_punt_nl_dynamische_stroomprijzen_jaar_YYYY.csv` | Day-ahead prices 2013–2026 (15-min, €/kWh kale; 2026 runs to early October). Loaded by glob using the `datum_utc` column, so a new year needs no code change. The loader also handles other layouts (separators, €/MWh, incl. taxes). |
 | `data/dynamic_prices_energieknl.csv` | Holds the yearly delivery costs (`leveringskost`) of 23 dynamic suppliers, **not** day-ahead prices. The price cross-check therefore can't run; the file is shown in the report for reference. |
 | `data/pv_production.csv` | Optional. Enables gross consumption and the solar-forecast Charge goal. |
 | `data/online/contracts.csv` | Contract schema (section 3.1). Has one **template** dynamic contract (`verified=no`) so the pipeline runs. Replace it with real supplier terms. |
@@ -64,7 +64,7 @@ defaults from `battery_defaults` in the config and marks those batteries as
   - **Self-consumption**: charges from surplus, discharges to cover load.
   - **Timed**: windows are searched on history.
   - **Dynamic** and **Dynamic + Sell**: per-day plans from day-ahead prices, gated by the battery's own
-    break-even, with a persistence solar forecast. The break-even can be scaled 0.5–1.5.
+    break-even, with a persistence solar forecast and energy reserved for the day's priciest load (tuned on 2023–2025: beats self-consumption under every rule set). The break-even can be scaled 0.5–1.5.
   - **Perfect foresight**: an LP upper bound (HiGHS).
 - `breakeven.py`: Objective 1. Wear cost uses the lifetime limit (cycles, warranty throughput or calendar
   life), and the result is recomputed with the simulated cycles.
@@ -117,7 +117,8 @@ build step in `pages.yml` to keep them out (an open question in the spec).
 
 ## Known limitations
 
-- No real price history or battery prices are in the repo yet (see Inputs). The CLI reports this clearly.
+- Battery prices are not in the repo yet, so payback can't be ranked; savings, cycles and break-even inputs are computed.
+- Dynamic contracts use a template until real supplier terms are added to `contracts.csv`.
 - Grid charges are configured only up to 3x25 (from `vast.txt`). Larger connections fall back with a warning.
   They are equal for every supplier, so rankings are unaffected.
 - The peak-shave strategy is not simulated. It only pays with a capacity tariff, which is a scenario flag that

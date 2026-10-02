@@ -55,6 +55,13 @@ def parse_price_frame(df: pd.DataFrame, cfg: dict, taxes: Taxes, name: str = "")
     tz = pc.get("timezone", "Europe/Amsterdam")
     # Time: first column(s) that parse as datetimes. Some files split date and hour.
     time_col, hour_col = None, None
+    # A UTC column (jeroen.nl has datum_nl and datum_utc) avoids DST ambiguity.
+    for c in df.columns:
+        if "utc" in c.lower() and pd.to_datetime(df[c], errors="coerce").notna().mean() > 0.9:
+            t = pd.to_datetime(df[c], errors="coerce").dt.tz_localize("UTC")
+            numeric = {k: _to_float(df[k]) for k in df.columns if k != c}
+            numeric = {k: v for k, v in numeric.items() if v.notna().mean() > 0.9}
+            return _finish(t, numeric, cfg, taxes, name)
     for c in df.columns:
         lc = c.lower()
         if any(k in lc for k in ("datum", "date", "tijd", "time", "start", "van", "from")):
@@ -81,6 +88,12 @@ def parse_price_frame(df: pd.DataFrame, cfg: dict, taxes: Taxes, name: str = "")
                     break
     numeric = {c: _to_float(df[c]) for c in df.columns if c not in (time_col, hour_col)}
     numeric = {c: v for c, v in numeric.items() if v.notna().mean() > 0.9}
+    return _finish(t, numeric, cfg, taxes, name)
+
+
+def _finish(t: pd.Series, numeric: dict, cfg: dict, taxes: Taxes, name: str) -> tuple[pd.Series, str]:
+    pc = cfg.get("prices", {})
+    tz = pc.get("timezone", "Europe/Amsterdam")
     if not numeric:
         raise ValueError(f"{name}: no numeric price column found")
 
@@ -154,6 +167,8 @@ def load_price_history(cfg: dict, taxes: Taxes, base_dir: str = ".", sources: di
         expected = pd.date_range(pd.Timestamp(year=y, month=1, day=1, tz=s15.index.tz),
                                  pd.Timestamp(year=y + 1, month=1, day=1, tz=s15.index.tz),
                                  freq="15min", inclusive="left")
+        if len(set(g.index.month)) < 12:
+            expected = expected[expected <= g.index.max()]   # partial year: covered range only
         missing = len(expected.difference(g.index)) / 4
         rep.missing_hours[int(y)] = missing
         months = sorted(set(g.index.month))
