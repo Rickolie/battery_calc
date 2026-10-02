@@ -1,0 +1,60 @@
+name: Deploy website
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  PYODIDE_VERSION: "0.27.2"   # keep in sync with web/worker.js
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q
+      - name: Fetch Pyodide (served from the site itself, no CDN at run time)
+        uses: actions/cache@v4
+        with:
+          path: pyodide
+          key: pyodide-${{ env.PYODIDE_VERSION }}
+      - run: |
+          if [ ! -f pyodide/pyodide.js ]; then
+            curl -sSL -o pyodide.tar.bz2 "https://github.com/pyodide/pyodide/releases/download/${PYODIDE_VERSION}/pyodide-${PYODIDE_VERSION}.tar.bz2"
+            tar xjf pyodide.tar.bz2
+            rm pyodide.tar.bz2
+          fi
+      # Rick's P1 data is published with the site. Add --no-ricks-data to keep it out (see Specs.txt open questions).
+      - run: python tools/build_site.py --out _site --pyodide-dist pyodide
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
