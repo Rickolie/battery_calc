@@ -303,3 +303,18 @@ def test_full_run_both_regimes_and_analyses(tmp_path):
     assert set(rk["analysis"]) == {"headline", "full"}
     assert (rk["payback_years"] > 0).all()
     assert os.path.exists(tmp_path / "res" / "breakeven.csv")
+
+
+def test_hbc_extreme_pair_matching():
+    from battery_calc.battery import CHARGE_PV, GRID_CHARGE, plan_hbc
+    idx = pd.date_range("2025-01-06", periods=96, freq="15min", tz="Europe/Amsterdam")
+    price = np.full(96, 0.20)
+    price[8:12] = 0.05          # cheap night
+    price[72:76] = 0.40         # evening peak
+    m = plan_hbc(idx, price, {"min_delta": 0.06})
+    assert (m[8:12] == GRID_CHARGE).all() and (m[72:76] == SELF).all()
+    assert (m[20:60] == CHARGE_PV).all()          # neutral default
+    capped = plan_hbc(idx, price, {"min_delta": 0.06, "cheapest_hrs": 0.5})
+    assert (capped == GRID_CHARGE).sum() == 2 and (capped[72:76] == SELF).all()
+    flat = plan_hbc(idx, np.full(96, 0.2), {"min_delta": 0.06})
+    assert (flat == CHARGE_PV).all()

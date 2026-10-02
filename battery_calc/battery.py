@@ -352,6 +352,51 @@ def plan_dynamic(index: pd.DatetimeIndex, u: np.ndarray, s: np.ndarray, b: Batte
     return modes
 
 
+HBC_MODES = {"charge": GRID_CHARGE, "charge_pv": CHARGE_PV, "self_consumption": SELF, "sell": FULL_DISCHARGE,
+             "full_stop": IDLE, "zero_import": ZERO_IMPORT}
+
+
+def plan_hbc(index: pd.DatetimeIndex, price: np.ndarray, cfg: dict) -> np.ndarray:
+    """Home Battery Control's Dynamic strategy ("Extreme-Pair Matching",
+    flow 02 strategy-dynamic-2.json), reproduced so its results are achievable
+    as-is: per local day, pair the cheapest with the most expensive interval
+    while the spread >= min_delta (respecting the per-day hour caps), mark them
+    low/high and apply the configured sub-strategy per mark. Pairs by price only,
+    not by time, exactly like the original."""
+    min_delta = float(cfg.get("min_delta", 0.06))
+    per_h = 4
+    cap_lo = int(round(float(cfg.get("cheapest_hrs", 0)) * per_h))
+    cap_hi = int(round(float(cfg.get("expensive_hrs", 0)) * per_h))
+    m_low = HBC_MODES[cfg.get("low", "charge")]
+    m_neu = HBC_MODES[cfg.get("neutral", "charge_pv")]
+    m_high = HBC_MODES[cfg.get("high", "self_consumption")]
+    modes = np.full(len(index), m_neu, dtype=np.int64)
+    day = np.asarray(index.normalize().asi8)
+    bounds = np.flatnonzero(np.diff(day)) + 1
+    for a, z in zip(np.concatenate([[0], bounds]), np.concatenate([bounds, [len(index)]])):
+        p = price[a:z]
+        order = np.argsort(p, kind="stable")
+        lo, hi = 0, len(order) - 1
+        n_lo = n_hi = 0
+        seg = modes[a:z]
+        while lo < hi:
+            if p[order[hi]] - p[order[lo]] < min_delta:
+                break
+            full_lo = cap_lo and n_lo >= cap_lo
+            full_hi = cap_hi and n_hi >= cap_hi
+            if full_lo and full_hi:
+                break
+            if not full_lo:
+                seg[order[lo]] = m_low
+                n_lo += 1
+            if not full_hi:
+                seg[order[hi]] = m_high
+                n_hi += 1
+            lo += 1
+            hi -= 1
+    return modes
+
+
 def perfect_foresight(net: np.ndarray, u: np.ndarray, s: np.ndarray, b: Battery, power_cap_w: float,
                       wear: float = 0.0, levels: int = 21) -> SimResult:
     """Upper bound on bill savings: all prices and flows known in advance.

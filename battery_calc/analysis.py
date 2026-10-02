@@ -13,7 +13,7 @@ import pandas as pd
 
 from . import charts
 from .battery import (GRID_CHARGE, SELF, ZERO_IMPORT, Battery, in_scope, load_batteries, perfect_foresight,
-                      plan_dynamic, plan_timed, simulate)
+                      plan_dynamic, plan_hbc, plan_timed, simulate)
 from .breakeven import breakeven_rows, wear_cost
 from .config import Connection, resolve
 from .contracts import Contract, load_contracts_csv, parse_vast, read_text
@@ -606,7 +606,8 @@ class Analysis:
         enabled = self.cfg.get("strategies", {}).get("enabled", [])
         out = [s for s in enabled if s in ("self_consumption", "timed")]
         if c.is_dynamic:
-            out += [s for s in enabled if s in ("dynamic", "dynamic_sell", "perfect_foresight")]
+            presets = self.cfg.get("strategies", {}).get("hbc_presets", {}) or {}
+            out += [s for s in enabled if s in ("dynamic", "dynamic_sell", "perfect_foresight") or s in presets]
         return out
 
     def sim_strategy(self, strategy, b, cap, per: Period, idx, c, scn, wear, windows=None, scale=1.0,
@@ -628,6 +629,9 @@ class Analysis:
                                  self.cfg.get("strategies", {}).get("dynamic", {}), export=per.exp,
                                  solar_forecast=self.pv_for(idx), imports=per.imp)
             return simulate(net, modes, bb, cap)
+        presets = self.cfg.get("strategies", {}).get("hbc_presets", {}) or {}
+        if strategy in presets:
+            return simulate(net, plan_hbc(idx, u, presets[strategy]), bb, cap)
         if strategy == "perfect_foresight":
             lv = self.cfg.get("strategies", {}).get("perfect_foresight", {}).get("soc_levels", 21)
             return perfect_foresight(net, u, s, bb, cap, 0.0, lv)
@@ -726,8 +730,11 @@ class Analysis:
               f"{self.cfg['analysis']['purchase_date']} year by year: 2026 rules until the end of 2026, then "
               f"2027–2029 rules, then 2030+ rules, with capacity fading towards end of life.",
               "Dynamic and Sell use each battery's own break-even (NL current price) from Objective 1; "
-              "decisions use only that day's day-ahead prices. `perfect_foresight` is the upper bound "
-              "(headline years only).",
+              "decisions use only that day's day-ahead prices, and stored energy is reserved for the day's "
+              "priciest load. **Home Battery Control cannot do this reservation today**: `dynamic` needs custom "
+              "control. `hbc_*` strategies reproduce Home Battery Control's Dynamic strategy exactly "
+              "(Extreme-Pair Matching, presets in config.yaml), so those results are achievable as-is. "
+              "`perfect_foresight` is the upper bound (headline years only).",
               "For fixed contracts there is one value (stated tariffs); for dynamic contracts the min–max is the "
               "payback across price years. Partial price years are excluded from the ranges."]
         if (self.prices is None):

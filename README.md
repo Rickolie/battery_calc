@@ -65,6 +65,7 @@ defaults from `battery_defaults` in the config and marks those batteries as
   - **Timed**: windows are searched on history.
   - **Dynamic** and **Dynamic + Sell**: per-day plans from day-ahead prices, gated by the battery's own
     break-even, with a persistence solar forecast and energy reserved for the day's priciest load (tuned on 2023–2025: beats self-consumption under every rule set). The break-even can be scaled 0.5–1.5.
+  - **hbc_default / hbc_pv_first**: Home Battery Control's Dynamic strategy reproduced exactly (Extreme-Pair Matching, `min_delta`, hour caps, Low/Neutral/High sub-strategies; presets in `config.yaml`). These results are achievable in Home Assistant as-is; `dynamic` needs custom control for its peak reservation.
   - **Perfect foresight**: an LP upper bound (HiGHS).
 - `breakeven.py`: Objective 1. Wear cost uses the lifetime limit (cycles, warranty throughput or calendar
   life), and the result is recomputed with the simulated cycles.

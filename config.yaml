@@ -141,7 +141,27 @@ battery_defaults:
   de_travel_cost_eur: 50.0
 
 strategies:
-  enabled: [self_consumption, timed, dynamic, dynamic_sell, perfect_foresight]
+  enabled: [self_consumption, timed, dynamic, dynamic_sell, hbc_default, hbc_pv_first, perfect_foresight]
+  # Home Battery Control (github.com/gitcodebob/marstek-venus-rs485-node-red)
+  # Dynamic strategy reproduced exactly ("Extreme-Pair Matching", flow
+  # 02 strategy-dynamic-2.json). These run as-is in Home Assistant; the
+  # `dynamic` strategy above needs custom control (peak reservation).
+  # Sub-strategies: charge, charge_pv, self_consumption, sell, full_stop.
+  hbc_presets:
+    hbc_default:        # HBC defaults
+      min_delta: 0.06
+      cheapest_hrs: 0
+      expensive_hrs: 0
+      low: charge
+      neutral: charge_pv
+      high: self_consumption
+    hbc_pv_first:       # HBC docs "PV-First Hybrid" without a solar forecast
+      min_delta: 0.0
+      cheapest_hrs: 0
+      expensive_hrs: 0
+      low: charge_pv
+      neutral: charge_pv
+      high: self_consumption
   dynamic:
     low_quantile: 0.25
     high_quantile: 0.75
