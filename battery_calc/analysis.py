@@ -578,6 +578,7 @@ class Analysis:
               "same, so one break-even applies; from 2027 the sell break-even is compared with the net feed-in price. "
               "Standby is a fixed cost, reported in Objective 3.",
               "`lifetime_limit` shows which limit (cycles, warranty throughput or calendar life) sets lifetime kWh."]
+        md += self.breakeven_explainer(rows)
         if cycles is None:
             md.append(f"Cycles per year: default {d.get('cycles_per_year', 250)} (replaced by simulated values in section 8).")
         sec.md = "\n".join(md)
@@ -608,6 +609,30 @@ class Analysis:
                            "compares prices incl. taxes, `setting_spot` if it compares spot (EPEX) prices "
                            "(all-in difference ÷ 1.21, because taxes per kWh are equal every hour).")
         self.emit(sec)
+
+    def breakeven_explainer(self, rows) -> list[str]:
+        """Plain-language formula with a worked example (first priced battery)."""
+        ex = next((r for r in rows if r["price_variant"] == "NL current" and r["purchase_eur"]
+                   and not math.isnan(r["wear_eur_kwh"])), None)
+        out = ["",
+               "**How the break-even price is calculated**",
+               "",
+               "`break-even price = charge price / RTE + wear cost` (€ per kWh delivered, all-in).",
+               "- **charge price / RTE** turns the price of a kWh *put into* the battery into the price of a kWh "
+               "*coming out*: with a round-trip efficiency (RTE) of 85% you lose 15%, so each delivered kWh costs "
+               "1/0.85 = 1.18 × the charge price.",
+               "- **wear cost** is already per kWh delivered (purchase price ÷ kWh the battery delivers over its "
+               "life), so it is added after the division – not `charge price / (RTE + wear cost)`.",
+               "- **Minimum price difference worth charging** = break-even − charge price "
+               "= charge price × (1/RTE − 1) + wear cost."]
+        if ex:
+            cp, rte, w = 0.20, ex["rte"], ex["wear_eur_kwh"]
+            be = cp / rte + w
+            out.append(f"- Example, {ex['battery']} (RTE {rte:.0%}, wear €{w:.3f}/kWh, €{ex['purchase_eur']:,.0f} "
+                       f"over {ex['lifetime_kwh']:,.0f} kWh) charging at €{cp:.2f}: {cp:.2f} / {rte:.2f} + {w:.3f} "
+                       f"= {cp / rte:.3f} + {w:.3f} = **€{be:.3f}/kWh**. Discharging only pays if that kWh is worth "
+                       f"at least this much, a price difference of €{be - cp:.3f}.")
+        return out
 
     def cheapest_dynamic(self):
         dyn = [c for c in self.contracts if c.is_dynamic]
@@ -873,6 +898,20 @@ class Analysis:
         ys = self.savings_year_chart(rec)
         if ys:
             sec.figures["savings_per_price_year"] = ys
+        bft = self.blackfriday_table(summary)
+        if bft is not None:
+            sec.tables["black_friday_quick_decision"] = bft
+            bfc = self.cfg.get("blackfriday", {}) or {}
+            w = bfc.get("window", ["11-20", "12-01"])
+            found = bft["nl_deal_eur"].notna().any() or bft["de_deal_eur"].notna().any()
+            md.append(f"**Black Friday quick decision** (window {w[0]} – {w[1]}, Black Friday {bfc.get('date', '')}): "
+                      "per battery its best contract and strategy, today's price, the real deal price the scraper "
+                      "found during the window (NL incl. VAT, DE 0% VAT from German manufacturer shops) with the "
+                      "discount against the last normal price, and the estimate "
+                      f"(−{float(bfc.get('discount_nl', 0.15)):.0%} NL / −{float(bfc.get('discount_de', 0.15)):.0%} DE). "
+                      "Sorted by the best available payback. "
+                      + ("" if found else "No real deals recorded yet: the scraper fills them in during the window "
+                         "(every 4 hours), until then the estimate columns apply."))
         self.chosen = self.pick_battery(summary)
         if self.chosen is not None:
             split = self.earnings_by_strategy(self.chosen, contracts, meta)
@@ -898,6 +937,41 @@ class Analysis:
                                & (rec.scenario == "nosal_min50")]["efc"].mean()
         if cyc:
             self.step_breakeven(cycles=cyc)
+
+    def blackfriday_table(self, summary):
+        rk = summary.get("ranked") if summary else None
+        if rk is None or rk.empty:
+            return None
+        h = rk[(rk.analysis == "headline") & (rk.strategy != "perfect_foresight")]   # only achievable strategies
+        now = h[h.price_variant == "NL current"]
+        if now.empty:
+            return None
+        best = now.sort_values("payback_years").drop_duplicates("_bid")
+        rows = []
+        for r in best.to_dict("records"):
+            b = next(x for x in self.batteries if x.id == r["_bid"])
+            same = h[(h._bid == r["_bid"]) & (h._cid == r["_cid"]) & (h.strategy == r["strategy"])]
+            pb = dict(zip(same.price_variant, same.payback_years))
+            pr = dict(zip(same.price_variant, same.price_eur))
+            disc = lambda deal, ref: (1 - deal / ref) if (deal and ref) else None
+            row = {"battery": r["battery"], "usable_kwh": r["usable_kwh"], "contract": r["contract"],
+                   "strategy": r["strategy"],
+                   "nl_now_eur": pr.get("NL current"), "payback_now": pb.get("NL current"),
+                   "nl_deal_eur": b.price_bf_nl, "nl_deal_discount": disc(b.price_bf_nl, b.price_nl_ref),
+                   "payback_nl_deal": pb.get("NL Black Friday"),
+                   "nl_est_eur": pr.get("NL Black Friday (est.)"), "payback_nl_est": pb.get("NL Black Friday (est.)"),
+                   "de_now_eur": b.price_de, "de_deal_eur": b.price_bf_de,
+                   "de_deal_discount": disc(b.price_bf_de, b.price_de_ref),
+                   "payback_de_deal": pb.get("DE Black Friday"), "payback_de_est": pb.get("DE Black Friday (est.)"),
+                   "deal_found": "; ".join(x for x in (b.bf_nl_info, b.bf_de_info) if x)}
+            cands = [v for v in (row["payback_nl_deal"], row["payback_de_deal"]) if v is not None]
+            row["best_payback"] = min(cands) if cands else min(
+                v for v in (row["payback_nl_est"], row["payback_now"]) if v is not None)
+            rows.append(row)
+        df = pd.DataFrame(rows).sort_values("best_payback").reset_index(drop=True)
+        for c in ("nl_deal_discount", "de_deal_discount"):
+            df[c] = df[c].map(lambda v: f"{v:.0%}" if isinstance(v, float) and not np.isnan(v) else "")
+        return df.round(2)
 
     # ------------------------------------------------------------------ 11.4 / 11.6 helpers
     def pick_battery(self, summary) -> Battery | None:

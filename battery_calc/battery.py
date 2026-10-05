@@ -54,6 +54,10 @@ class Battery:
     dc_solar_w: float | None = None          # DC solar (MPPT) input on the battery itself (W)
     price_bf_nl: float | None = None         # Black Friday deal NL, incl. VAT
     price_bf_de: float | None = None         # Black Friday deal DE, 0% VAT
+    price_nl_ref: float | None = None        # last normal NL price before the Black Friday window
+    price_de_ref: float | None = None
+    bf_nl_info: str = ""                     # date and shop of the deal
+    bf_de_info: str = ""
     estimated_fields: list = field(default_factory=list)
     missing_fields: list = field(default_factory=list)
 
@@ -77,18 +81,19 @@ class Battery:
             out["DE 0% VAT (scenario)"] = self.price_de + self.extra_hardware + de_travel
         if bf is not None and bf.get("enabled", True):
             vat = float(bf.get("vat", 0.21))
+            # Real deals found by the scraper during the Black Friday window ...
             if self.price_bf_nl is not None:
                 out["NL Black Friday"] = self.price_bf_nl + self.extra_hardware
-            elif self.price_nl is not None:
-                out["NL Black Friday (est.)"] = self.price_nl * (1 - float(bf.get("discount_nl", 0.15))) + self.extra_hardware
             if self.price_bf_de is not None:
                 out["DE Black Friday"] = self.price_bf_de + self.extra_hardware + de_travel
-            else:
-                base = self.price_de if self.price_de is not None else (
-                    self.price_nl / (1 + vat) if self.price_nl is not None else None)
-                if base is not None:
-                    out["DE Black Friday (est.)"] = (base * (1 - float(bf.get("discount_de", 0.15)))
-                                                     + self.extra_hardware + de_travel)
+            # ... and always the estimate (configured discount on today's price).
+            if self.price_nl is not None:
+                out["NL Black Friday (est.)"] = self.price_nl * (1 - float(bf.get("discount_nl", 0.15))) + self.extra_hardware
+            base = self.price_de if self.price_de is not None else (
+                self.price_nl / (1 + vat) if self.price_nl is not None else None)
+            if base is not None:
+                out["DE Black Friday (est.)"] = (base * (1 - float(bf.get("discount_de", 0.15)))
+                                                 + self.extra_hardware + de_travel)
         return out
 
 
@@ -161,6 +166,9 @@ def load_batteries(source, defaults: dict) -> list[Battery]:
             dc_solar_w=_num(r.get("dc_solar_input_w")),
             price_bf_nl=_num(r.get("price_blackfriday_nl_incl_vat")),
             price_bf_de=_num(r.get("price_blackfriday_de_excl_vat")),
+            price_nl_ref=_num(r.get("price_nl_ref_incl_vat")), price_de_ref=_num(r.get("price_de_ref_excl_vat")),
+            bf_nl_info=" ".join(x for x in (r.get("price_blackfriday_nl_date", ""), r.get("price_blackfriday_nl_source", "")) if x),
+            bf_de_info=" ".join(x for x in (r.get("price_blackfriday_de_date", ""), r.get("price_blackfriday_de_source", "")) if x),
             source=r.get("source_url", ""), retrieved_at=r.get("retrieved_at", ""),
             verified=str(r.get("verified", "")).lower() in ("yes", "true", "1"), notes=r.get("notes", ""),
         )

@@ -192,6 +192,7 @@ strategies:
 blackfriday:
   enabled: true
   date: '2026-11-27'
+  window: ['11-20', '12-01']   # MM-DD; the scraper records real deal prices in this window
   discount_nl: 0.15
   discount_de: 0.15
   vat: 0.21

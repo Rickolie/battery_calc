@@ -303,6 +303,12 @@ def test_full_run_both_regimes_and_analyses(tmp_path):
     assert set(rk["analysis"]) == {"headline", "full"}
     assert (rk["payback_years"] > 0).all()
     assert os.path.exists(tmp_path / "res" / "breakeven.csv")
+    # every column shown in a report table has a plain-language description
+    from battery_calc.columns import describe
+    from battery_calc.report import shown_columns
+    missing = [(name, c) for s in secs.values() for name, df in s.tables.items()
+               for c in shown_columns(df) if describe(c, name) is None]
+    assert not missing, missing
 
 
 def test_hbc_extreme_pair_matching():
@@ -374,3 +380,44 @@ def test_power_profile_shares(profile):
     stats, cover, _, _, _ = power_profile(pr, real)
     shares = cover["share_of_surplus_it_can_store"].values
     assert np.all(np.diff(shares) >= 0) and shares[-1] <= 1.0 + 1e-9
+
+
+def test_variant_match_rules():
+    from battery_calc.scrape import _variant_match
+    t = "SolarFlow 2400 AC+ (2.4 kWh) / 1*AB3000L (2.88 kWh)"
+    assert _variant_match(t, "1*ab3000l&!smart meter")
+    assert not _variant_match("SolarFlow 2400 AC+ + Smart Meter D0 / 1*AB3000L", "1*ab3000l&!smart meter")
+    assert _variant_match("STREAM AC 5000", "=stream ac 5000")
+    assert not _variant_match("2 × STREAM AC 5000", "=stream ac 5000")
+    assert _variant_match("SolarVault 3 Pro Max AC 5,04kWh", "5.04kwh")
+
+
+def test_blackfriday_scrape_records_deal_and_reference(tmp_path, monkeypatch):
+    import datetime as dt
+    import json as js
+    from battery_calc import scrape
+    csv = tmp_path / "b.csv"
+    pd.DataFrame([{"id": "x", "brand": "B", "model": "M", "price_nl_incl_vat": "", "price_nl_lowest_incl_vat": "",
+                   "shop_urls": "shopify:https://shop.example/products/bat|=base",
+                   "shop_urls_de": "shopify:https://shop.de/products/bat|=base"}]).to_csv(csv, index=False)
+    prices = {"nl": 1000_00, "de": 800_00}
+
+    def fake_fetch(url, timeout=30):
+        cents = prices["de"] if "shop.de" in url else prices["nl"]
+        return js.dumps({"variants": [{"title": "Base", "price": cents, "compare_at_price": None, "available": True},
+                                      {"title": "Base + extra", "price": 1, "available": True}]})
+    monkeypatch.setattr(scrape, "fetch", fake_fetch)
+    cfg = dict(CFG)
+    cfg["paths"] = dict(CFG["paths"], batteries_file=str(csv))
+    scrape.scrape_battery_prices(cfg, today=dt.date(2026, 11, 10))          # before the window
+    prices.update(nl=850_00, de=700_00)
+    scrape.scrape_battery_prices(cfg, today=dt.date(2026, 11, 27))          # Black Friday
+    prices.update(nl=900_00, de=750_00)
+    scrape.scrape_battery_prices(cfg, today=dt.date(2026, 11, 28))          # price goes up again
+    r = pd.read_csv(csv).iloc[0]
+    assert r.price_nl_ref_incl_vat == 1000 and r.price_de_ref_excl_vat == 800
+    assert r.price_blackfriday_nl_incl_vat == 850 and r.price_blackfriday_de_excl_vat == 700   # lowest kept
+    assert r.price_blackfriday_nl_date == "2026-11-27"
+    assert r.price_nl_incl_vat == 900
+    scrape.scrape_battery_prices(cfg, today=dt.date(2027, 11, 1))           # next season starts clean
+    assert pd.isna(pd.read_csv(csv).iloc[0].price_blackfriday_nl_incl_vat)
