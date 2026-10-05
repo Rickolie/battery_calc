@@ -9,6 +9,14 @@ GLOSSARY = {
     # ------------------------------------------------------------ general
     "size_class": "Capacity class: nominal capacity within ± the half-width of the class centre.",
     "nominal_kwh": "Nominal (advertised) capacity in kWh.",
+    "full_year": "True for a complete ownership year; the partial purchase year and partial last year are False.",
+    "charged_kwh": "Energy put into the battery in the profile year (kWh, AC side).",
+    "delivered_kwh": "Energy delivered by the battery in the profile year (kWh, AC side).",
+    "export_before_kwh": "Yearly export without battery (kWh).",
+    "export_after_kwh": "Yearly export with battery (kWh).",
+    "end_capacity_kwh": "Usable capacity left at the end of the year after degradation (kWh).",
+    "balance_error_kwh": "Largest energy-balance error in any 15 minutes (kWh); should be ~0.",
+
     "candidates": "How many simulated batteries fall in this size class.",
     "extra_saving_vs_smaller": "Extra yearly saving from 2027 compared with the best battery of the next smaller "
                                "class (€).",
@@ -226,6 +234,10 @@ PATTERNS = [
     (r"at_charge_(\d+\.\d+)", "Minimum price difference worth charging when charging at €{0}/kWh: the discharge "
                               "price must be at least this much higher (all-in, €/kWh)."),
     (r"saving_(.+)", "Average yearly saving with the battery under the {0} (€)."),
+    (r"(\d+) kWh", "Saving per year of the best {0} kWh battery (€, 2027–2029 rules, latest full price year)."),
+    (r"free_days_(\d+)_kwh", "Free firing days per year with the best {0} kWh battery."),
+    (r"avg_cost_per_firing_(\d+)_kwh", "Average grid cost per firing with the best {0} kWh battery (€)."),
+    (r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", "Free firing days in {0}."),
     (r"eur_(\d{4})", "Saving in price year {0} under 2027–2029 rules (€, wear not deducted)."),
     (r"^(\d{1,2})$", "Free firing days in month {0} (1 = January)."),
 ]

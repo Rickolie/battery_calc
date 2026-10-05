@@ -336,7 +336,7 @@ def test_full_run_both_regimes_and_analyses(tmp_path):
     from battery_calc.report import shown_columns
     missing = [(name, c) for s in secs.values() for name, df in s.tables.items()
                for c in shown_columns(df) if describe(c, name) is None]
-    assert not missing, missing
+    assert not missing, "\n".join(map(str, missing))
     # every printed table has a one-line finding, and sections render collapsed
     from battery_calc.report import section_html
     from battery_calc.summaries import summarize

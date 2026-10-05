@@ -60,9 +60,24 @@ def table_html(df: pd.DataFrame, max_rows: int = 60) -> str:
 
 
 def md_inline_to_html(text: str) -> str:
-    """Tiny Markdown subset: paragraphs, bullets, bold, code."""
-    out, in_list = [], False
+    """Tiny Markdown subset: paragraphs, bullets, bold, italic, code, ##/### headings.
+    A `#### Title` line starts a collapsible block (closed) that runs to the next
+    heading or the end, so long explanations stay out of the way."""
+    out, in_list, in_more = [], False, False
     for line in text.splitlines():
+        mm = re.match(r"^#### (.*)", line)
+        if mm or (in_more and re.match(r"^#{2,3} ", line)):
+            if in_list:
+                out.append("</ul>")
+                in_list = False
+            if in_more:
+                out.append("</details>")
+                in_more = False
+            if mm:
+                title = re.sub(r"`(.+?)`", r"<code>\1</code>", html.escape(mm.group(1)))
+                out.append(f"<details class='more'><summary>{title}</summary>")
+                in_more = True
+                continue
         esc = html.escape(line)
         esc = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", esc)
         esc = re.sub(r"(?<![\w*])\*([^*\s][^*]*?)\*(?![\w*])", r"<em>\1</em>", esc)
@@ -89,6 +104,8 @@ def md_inline_to_html(text: str) -> str:
             out.append(f"<p>{esc}</p>")
     if in_list:
         out.append("</ul>")
+    if in_more:
+        out.append("</details>")
     return "\n".join(out)
 
 
@@ -145,6 +162,9 @@ def section_md(sec, fig_dir_rel: str | None = None) -> str:
     for name in sec.figures:
         if fig_dir_rel is not None:
             parts += [f"![{name}]({fig_dir_rel}/{sec.id}_{name}.png)", ""]
+    only_html = [s.get("title", n) for n, s in (getattr(sec, "interactive", {}) or {}).items() if n not in sec.figures]
+    if only_html:
+        parts += ["_Interactive charts in report.html: " + "; ".join(only_html) + "._", ""]
     return "\n".join(parts)
 
 
@@ -152,7 +172,8 @@ def chart_html(spec: dict) -> str:
     """Placeholder + data for an interactive (zoomable) chart, rendered by static/charts.js."""
     import json
     data = json.dumps(spec, separators=(",", ":"), allow_nan=False, default=float).replace("</", "<\\/")
-    note = "<p class='zoomhint'>Drag across the chart to zoom in, double-click to zoom out, click a legend item to hide it.</p>"
+    note = ("<p class='zoomhint'>Hover a bar, point or line to see the values.</p>" if spec.get("kind") else
+            "<p class='zoomhint'>Drag across the chart to zoom in, double-click to zoom out, click a legend item to hide it.</p>")
     return f"<div class='ichart'></div><script type='application/json'>{data}</script>{note}"
 
 
@@ -165,8 +186,16 @@ def section_html(sec, open_: bool = False) -> str:
     parts = [f"<section id='{sec.id}'><details class='sec'{' open' if open_ else ''}>{head}",
              "<div class='secbody'>", md_inline_to_html(sec.md)]
     interactive = getattr(sec, "interactive", {}) or {}
+    groups: dict = {}
     for name, spec in interactive.items():
-        parts.append(chart_html(spec))
+        g = spec.get("group")
+        if g:
+            groups.setdefault(g, []).append(spec)
+        else:
+            parts.append(chart_html(spec))
+    for g, specs in groups.items():
+        parts.append(f"<details class='more'><summary>{html.escape(g)}</summary>"
+                     + "".join(chart_html(s) for s in specs) + "</details>")
     for name, df in sec.tables.items():
         if name in getattr(sec, "csv_only", set()):
             parts.append(f"<p class='zoomhint'>{html.escape(name)}: {len(df)} rows – see the CSV download below.</p>")
@@ -211,6 +240,7 @@ details.sec>summary{cursor:pointer;padding:6px 0}details.sec>summary h2{display:
 .keyfind{margin:2px 0 0 18px;color:#555;font-size:.9rem}
 details.tblw{margin:6px 0}details.tblw>summary{cursor:pointer;font-size:.9rem}.tname{font-family:monospace;font-weight:600}
 .togglebar button{margin-right:6px}
+details.more{margin:6px 0 10px;border-left:3px solid #e4e3df;padding-left:10px}details.more>summary{cursor:pointer;font-weight:600}
 @media (prefers-color-scheme: dark){body{background:#111;color:#eee}th{background:#222}td,th{border-color:#333}code{background:#222}}"""
 
 

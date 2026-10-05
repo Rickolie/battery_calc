@@ -95,13 +95,14 @@ function contractForm() {
 
 // Every section the analysis produces, in order; shown as a live contents list.
 const SECTIONS = [
-  ["advice", "Advice – which battery, which contract, and why"], ["data", "1. Data quality"],
-  ["power", "1b. Power profile"], ["current", "2. Current contract"],
-  ["contracts", "3. Objective 2 – best contract without a battery"], ["batteries", "4. Battery dataset"],
-  ["breakeven", "5. Objective 1 – break-even price per battery"], ["sanity", "6. Self-consumption sanity check"],
-  ["payback", "7. Objective 3 – battery payback per strategy (slowest step)"],
-  ["breakeven_recomputed", "8. Objective 1 recomputed with simulated cycles"],
-  ["kiln", "9. Objective 4 – pottery kiln on free power"],
+  ["advice", "Advice – which battery, which contract, and why"], ["data", "1. Your data"],
+  ["power", "2. Power profile"], ["current", "3. Current contract"],
+  ["contracts", "4. Cheapest contract without a battery"], ["batteries", "5. Battery options"],
+  ["breakeven", "6. Break-even price per battery"],
+  ["payback", "7. Payback per battery size and strategy (slowest step)"],
+  ["breakeven_recomputed", "8. Break-even with simulated cycles"],
+  ["sanity", "9. Battery over the year – check per size"],
+  ["kiln", "10. Pottery kiln on free power"],
 ];
 
 function renderToc() {
