@@ -167,6 +167,15 @@ GLOSSARY = {
     "payback_de_est": "Payback at the estimated German Black Friday price plus travel cost (years).",
     "deal_found": "Date and shop where the deal price was found.",
     "best_payback": "Best payback of the real deals, or of the estimate/today's price if no deal is known yet.",
+    # ------------------------------------------------------------ feed-in value
+    "avg_spot_eur_kwh": "Average day-ahead (EPEX) price over all hours of that year (€/kWh, excl. taxes).",
+    "avg_spot_when_exporting": "Average day-ahead price weighted by how much you export in each quarter-hour – "
+                               "what your solar surplus is actually worth on the market (€/kWh).",
+    "export_at_negative_price_pct": "Share of your yearly export that happens while the day-ahead price is "
+                                    "negative; on a dynamic contract that export costs money.",
+    "feed_in_income_eur": "Yearly feed-in income on the cheapest dynamic contract under the 2027–2029 rules (€).",
+    "feed_in_income_per_kwh": "Feed-in income per exported kWh (€/kWh); slightly above the market value because "
+                              "the 50% legal minimum lifts negative-price hours.",
     # ------------------------------------------------------------ advice
     "saving_eur_year_2027": "Average yearly saving with this battery from 2027 (2027–2029 rules, last 3 price years), €.",
     "days_full": "Days per year on which the battery gets completely full (self-consumption on your profile year).",

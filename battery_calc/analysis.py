@@ -469,9 +469,43 @@ class Analysis:
                   "against every price year under the scenario's rules. `real_months_only` excludes synthetic months. "
                   "`avg_eur_year_over_term` spreads the cost over the contract term from the purchase date, "
                   "switching rules on 1 January 2027, and subtracts the one-off switch bonus once. Yearly figures exclude the bonus.")
-        sec.md = "\n".join(md)
         self.expected_by_contract = expected_by_contract
+        fv = self.feed_in_value_table()
+        if fv is not None:
+            sec.tables["feed_in_value_per_year"] = fv
+            last = fv.iloc[-1]
+            md.append(f"**Why feed-in earns little on a dynamic contract:** you export mostly around midday, when "
+                      f"solar pushes day-ahead prices down. In {int(last.year)} the average spot price was "
+                      f"€{last.avg_spot_eur_kwh:.3f}/kWh, but only €{last.avg_spot_when_exporting:.3f} in the quarter-hours "
+                      f"you export, and {last.export_at_negative_price_pct:.0f}% of your export fell in negative-price "
+                      f"hours (those cost money). See `feed_in_value_per_year`.")
+        sec.md = "\n".join(md)
         self.emit(sec)
+
+    def feed_in_value_table(self):
+        """Export-weighted spot price per price year on the cheapest dynamic contract (2027 rules)."""
+        c = self.cheapest_dynamic()
+        if c is None:
+            return None
+        rows = []
+        for y in self.full_years:
+            if y in self.partial_years:
+                continue
+            r = self.replay(y, "nosal_min50")
+            if r is None:
+                continue
+            per = r[0]
+            e, p = per.exp, per.spot
+            w = e.sum()
+            if w <= 0:
+                continue
+            res = compute_cost(per, c, self.regimes["nosal_min50"], self.taxes, self.conn.label, include_fixed=False)
+            rows.append({"year": y, "export_kwh": w, "avg_spot_eur_kwh": p.mean(),
+                         "avg_spot_when_exporting": (e * p).sum() / w,
+                         "export_at_negative_price_pct": 100 * e[p < 0].sum() / w,
+                         "feed_in_income_eur": res.feed_in_income,
+                         "feed_in_income_per_kwh": res.feed_in_income / w})
+        return pd.DataFrame(rows).round(3) if rows else None
 
     # ------------------------------------------------------------------ step 4
     def step_batteries(self):
