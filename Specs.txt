@@ -531,3 +531,16 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
 - **Report structure:**
   - Sections are numbered in reading order: Advice; 1 Your data; 2 Power profile; 3 Current contract; 4 Cheapest contract without a battery; 5 Battery options; 6 Break-even; 7 Payback; 8 Break-even with simulated cycles; 9 Battery over the year; 10 Pottery kiln.
   - Each section opens with formulas and a few key lines; longer explanations sit in collapsible `####` blocks.
+
+### 11.13 Zero-export curtailment (2026-10-05)
+
+- **New strategies** `self_consumption_curtail` and `forecast_curtail` (dynamic contracts; `strategies.curtail` in config.yaml):
+  - The base strategy runs unchanged.
+  - Whatever is still exported after the battery has taken what it can (full, or at its power limit) is curtailed: the solar inverter scales back to zero export in every quarter-hour where the export value is below `below_eur_kwh` (default 0, i.e. negative prices only).
+  - A large threshold gives always-zero export. That also gives up positive feed-in income.
+- **Effect** (Marstek 5.12 kWh, Powerpeers, 2023–2025): self-consumption +€8/yr (2027–2029 rules) and +€20/yr (2030+); forecast +€6 / +€14. Smaller for bigger batteries, which absorb more of the negative-price solar themselves.
+- **Shown in the report:**
+  - the earnings split, as a "Curtailed export (negative prices avoided)" part;
+  - the gap table (`forecast_curtail`);
+  - all payback tables.
+- **Needs** an inverter Home Assistant can scale back. Part of the gain would also exist without a battery.

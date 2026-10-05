@@ -146,7 +146,8 @@ battery_defaults:
   de_travel_cost_eur: 50.0
 
 strategies:
-  enabled: [self_consumption, timed, dynamic, dynamic_sell, forecast, hbc_default, hbc_pv_first, perfect_foresight]
+  enabled: [self_consumption, timed, dynamic, dynamic_sell, forecast, hbc_default, hbc_pv_first, perfect_foresight,
+            curtail]
   # Home Battery Control (github.com/gitcodebob/marstek-venus-rs485-node-red)
   # Dynamic strategy reproduced exactly ("Extreme-Pair Matching", flow
   # 02 strategy-dynamic-2.json). These run as-is in Home Assistant; the
@@ -198,6 +199,13 @@ strategies:
     forecast_days: 3
     wear_scale: 0.5
     tolerance_kwh: 0.02
+  # Zero-export curtailment (dynamic contracts): after the battery has taken what
+  # it can, remaining solar export is switched off in quarter-hours where export
+  # is worth less than below_eur_kwh (0 = only negative-value export; a large
+  # value = always zero export, which also gives up positive feed-in income).
+  curtail:
+    bases: [self_consumption, forecast]
+    below_eur_kwh: 0.0
   perfect_foresight:
     soc_levels: 21
 
