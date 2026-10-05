@@ -62,6 +62,8 @@ def run(settings_json: str, on_section=None, config_path: str = "config.yaml") -
     for k in ("discount_nl", "discount_de"):
         if bf.get(k) is not None:
             cfg.setdefault("blackfriday", {})[k] = float(bf[k])
+    if bf.get("estimates") is not None:
+        cfg.setdefault("blackfriday", {})["estimates"] = bool(bf["estimates"])
     kiln = {k: float(v) for k, v in (s.get("kiln") or {}).items() if v not in (None, "")}
     opts = Options(connection=s.get("connection", cfg["connection"]["default"]),
                    margin=float(s.get("margin", cfg["connection"]["margin"])),

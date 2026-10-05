@@ -28,6 +28,8 @@ def build_parser(cfg_default_conn="3x25"):
     p.add_argument("--batteries", default=None, help="all, shortlist, or comma-separated battery ids")
     p.add_argument("--battery", default=None, help="chosen battery id for the earnings split and the kiln objective")
     p.add_argument("--kiln-hours", type=float, default=None, help="hours of a firing to maximum temperature")
+    p.add_argument("--no-bf-estimates", action="store_true",
+                   help="Black Friday: only real scraped deals, no estimated-discount rows")
     p.add_argument("--kiln-duty", type=float, default=None, help="average share of rated power drawn during a firing")
     return p
 
@@ -35,6 +37,8 @@ def build_parser(cfg_default_conn="3x25"):
 def main(argv=None):
     args = build_parser().parse_args(argv)
     cfg = load_config(args.config)
+    if args.no_bf_estimates:
+        cfg.setdefault("blackfriday", {})["estimates"] = False
     conn = args.connection or cfg.get("connection", {}).get("default", "3x25")
     margin = args.connection_margin if args.connection_margin is not None else cfg.get("connection", {}).get("margin", 0.2)
     if args.out:

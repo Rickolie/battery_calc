@@ -45,10 +45,29 @@
       new ResizeObserver(() => u.setSize({ width: Math.max(320, div.clientWidth), height: opts.height })).observe(div);
     }
   }
+  // Charts inside a closed <details> have no width yet: build them when opened.
   window.renderInteractiveCharts = function (root) {
     if (typeof uPlot === "undefined") return;
-    (root || document).querySelectorAll("div.ichart").forEach(build);
+    (root || document).querySelectorAll("div.ichart").forEach((div) => {
+      if (div.offsetParent !== null) build(div);
+    });
   };
+  document.addEventListener("toggle", (e) => {
+    if (e.target.open) window.renderInteractiveCharts(e.target);
+  }, true);
+  // Expand / collapse every section and table.
+  window.setAllDetails = function (open) {
+    document.querySelectorAll("details.sec, details.tblw").forEach((d) => { d.open = open; });
+    if (open) window.renderInteractiveCharts();
+  };
+  // A link to a section (contents list) opens it.
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("a[href^='#']");
+    if (!a) return;
+    const target = document.getElementById(a.getAttribute("href").slice(1));
+    const d = target && target.querySelector("details.sec");
+    if (d) d.open = true;
+  });
   if (document.readyState !== "loading") window.renderInteractiveCharts();
   else document.addEventListener("DOMContentLoaded", () => window.renderInteractiveCharts());
 })();

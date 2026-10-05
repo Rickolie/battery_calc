@@ -497,3 +497,17 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - full perfect foresight.
 - **Answer to "sell the rest at dinner time":** the optimiser already sells when that pays. Perfect foresight shows that selling stored solar adds little for this household, because the battery is nearly empty by sunrise. Most of the gap is timing: when to absorb solar and when to use it. That depends on predicting the household's own solar and usage.
 - **Timed vs Dynamic:** the Timed windows are searched on the last headline year and evaluated on it too (in-sample). Its grid charging ignores wear. The gap table shows per year where Timed wins.
+
+### 11.11 Battery size classes and a collapsible report (2026-10-05)
+
+- **Best value per size class** (advice section, table `best_per_size_class`):
+  - Classes are nominal capacity 5, 10 and 15 kWh ± 2.5 kWh (`analysis.size_classes_kwh`, `size_class_halfwidth_kwh`).
+  - Each class shows its fastest-payback battery: price, € per usable kWh, best strategy, saving from 2027, payback and net present value.
+  - Each class also shows what the step up from the next smaller class adds: extra saving, extra price, and the payback of that extra.
+  - The advice text says which class pays back fastest and which earns most over the battery's life.
+  - The shortlist holds at least two batteries per class.
+- **Collapsible website and HTML report:**
+  - Every section and every table starts closed.
+  - The section title shows its key finding; a table title shows a one-line finding (`battery_calc/summaries.py`). The Markdown report prints the same findings in italics.
+  - Expand all / Collapse all buttons; a link in the contents list opens its section.
+  - Zoomable charts are drawn when their section is opened.

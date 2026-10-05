@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from .columns import describe_table
+from .summaries import summarize
 
 
 YEAR_COLS = {"year", "jaar", "price_year", "maand"}
@@ -117,13 +118,30 @@ def columns_html(df: pd.DataFrame, name: str) -> str:
     return f"<details class='cols' open><summary>Column descriptions</summary><dl>{rows}</dl></details>"
 
 
+def section_key_finding(sec) -> str:
+    """One line shown next to the (collapsed) section title."""
+    if getattr(sec, "summary", ""):
+        return sec.summary
+    for name, df in sec.tables.items():
+        s = summarize(name, df)
+        if s:
+            return s
+    return ""
+
+
 def section_md(sec, fig_dir_rel: str | None = None) -> str:
-    parts = [f"## {sec.title}", "", sec.md, ""]
+    parts = [f"## {sec.title}", ""]
+    key = section_key_finding(sec)
+    if key:
+        parts += [f"**Key finding:** {key}", ""]
+    parts += [sec.md, ""]
     for name, df in sec.tables.items():
         if name in getattr(sec, "csv_only", set()):
             parts += [f"_{name}: {len(df)} rows, in the CSV download._", ""]
             continue
-        parts += [f"### {name}", "", table_md(df), "", columns_md(df, name), ""]
+        s = summarize(name, df)
+        parts += [f"### {name}", ""] + ([f"_Finding: {s}_", ""] if s else []) + [table_md(df), "",
+                                                                                columns_md(df, name), ""]
     for name in sec.figures:
         if fig_dir_rel is not None:
             parts += [f"![{name}]({fig_dir_rel}/{sec.id}_{name}.png)", ""]
@@ -138,8 +156,14 @@ def chart_html(spec: dict) -> str:
     return f"<div class='ichart'></div><script type='application/json'>{data}</script>{note}"
 
 
-def section_html(sec) -> str:
-    parts = [f"<section id='{sec.id}'><h2>{html.escape(sec.title)}</h2>", md_inline_to_html(sec.md)]
+def section_html(sec, open_: bool = False) -> str:
+    """A section as a collapsible block (closed by default) whose title line shows
+    the key finding; every table is collapsible too, with its own finding."""
+    key = section_key_finding(sec)
+    head = (f"<summary><h2>{html.escape(sec.title)}</h2>"
+            + (f"<p class='keyfind'>{html.escape(key)}</p>" if key else "") + "</summary>")
+    parts = [f"<section id='{sec.id}'><details class='sec'{' open' if open_ else ''}>{head}",
+             "<div class='secbody'>", md_inline_to_html(sec.md)]
     interactive = getattr(sec, "interactive", {}) or {}
     for name, spec in interactive.items():
         parts.append(chart_html(spec))
@@ -147,14 +171,22 @@ def section_html(sec) -> str:
         if name in getattr(sec, "csv_only", set()):
             parts.append(f"<p class='zoomhint'>{html.escape(name)}: {len(df)} rows – see the CSV download below.</p>")
             continue
-        parts += [f"<h3>{html.escape(name)}</h3>", table_html(df), columns_html(df, name)]
+        s = summarize(name, df)
+        parts.append(f"<details class='tblw'><summary><span class='tname'>{html.escape(name)}</span>"
+                     + (f" – {html.escape(s)}" if s else f" – {len(df)} rows") + "</summary>"
+                     + table_html(df) + columns_html(df, name) + "</details>")
     for name, png in sec.figures.items():
         if name in interactive:
             continue          # shown as a zoomable chart above
         b64 = base64.b64encode(png).decode()
         parts.append(f"<figure><img alt='{html.escape(name)}' src='data:image/png;base64,{b64}'/></figure>")
-    parts.append("</section>")
+    parts.append("</div></details></section>")
     return "\n".join(parts)
+
+
+TOGGLE_BAR = ("<p class='togglebar'><button type='button' onclick='setAllDetails(true)'>Expand all</button> "
+              "<button type='button' onclick='setAllDetails(false)'>Collapse all</button> "
+              "<span class='zoomhint'>Click a section or table title to open it.</span></p>")
 
 
 def _static(name: str) -> str:
@@ -175,6 +207,10 @@ img{max-width:100%}
 .cols{font-size:12px;margin:4px 0 14px}.cols summary{cursor:pointer;color:#555}
 .cols dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;margin:6px 0}
 .cols dt{font-family:monospace;font-weight:600}.cols dd{margin:0}code{background:#f3f4f6;padding:0 3px}
+details.sec>summary{cursor:pointer;padding:6px 0}details.sec>summary h2{display:inline;font-size:1.2rem}
+.keyfind{margin:2px 0 0 18px;color:#555;font-size:.9rem}
+details.tblw{margin:6px 0}details.tblw>summary{cursor:pointer;font-size:.9rem}.tname{font-family:monospace;font-weight:600}
+.togglebar button{margin-right:6px}
 @media (prefers-color-scheme: dark){body{background:#111;color:#eee}th{background:#222}td,th{border-color:#333}code{background:#222}}"""
 
 
@@ -194,7 +230,8 @@ def render_html(sections, meta) -> str:
     return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' "
             f"content='width=device-width,initial-scale=1'><title>{title}</title><style>{CSS}{_static('uPlot.min.css')}</style>"
             f"<script>{_static('uPlot.iife.min.js')}</script><script>{_static('charts.js')}</script></head><body>"
-            + md_inline_to_html(header_md(meta).replace("# ", "**", 1).replace(" –", "** –", 1)) + body + "</body></html>")
+            + md_inline_to_html(header_md(meta).replace("# ", "**", 1).replace(" –", "** –", 1)) + TOGGLE_BAR + body
+            + "</body></html>")
 
 
 def write_outputs(sections, meta, out_dir: str) -> dict:

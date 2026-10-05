@@ -135,7 +135,7 @@ $("run").onclick = () => {
     connection: $("connection").value, margin: parseFloat($("margin").value), price_variant: $("variant").value,
     feed_in_2030: parseFloat($("fi2030").value), quick: $("quick").value === "1",
     battery_set: $("bset").value, chosen_battery: $("chosen").value,
-    blackfriday: { discount_nl: pct("bfnl"), discount_de: pct("bfde") },
+    blackfriday: { discount_nl: pct("bfnl"), discount_de: pct("bfde"), estimates: $("bfest").checked },
     kiln: { firing_hours: num("kh"), avg_duty: pct("kd") },
   };
   worker.postMessage({ cmd: "run", settings });
@@ -150,7 +150,7 @@ function onSection(sec) {
     state.csv[name] = csv;
     links.appendChild(downloadLink(name, csv, "text/csv"));
   }
-  div.querySelector("section").appendChild(links);
+  (div.querySelector("section .secbody") || div.querySelector("section")).appendChild(links);
   // The recommendation goes to the top; everything else in order of arrival.
   if (sec.id === "advice") $("results").prepend(div); else $("results").appendChild(div);
   if (window.renderInteractiveCharts) window.renderInteractiveCharts(div);

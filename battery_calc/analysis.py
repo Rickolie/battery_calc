@@ -35,6 +35,7 @@ class Section:
     figures: dict = field(default_factory=dict)
     interactive: dict = field(default_factory=dict)   # name -> chart spec (zoomable in HTML; PNG in Markdown)
     csv_only: set = field(default_factory=set)       # table names offered as CSV download, not printed
+    summary: str = ""        # key finding next to the collapsed title (default: first table's finding)
 
 
 @dataclass
@@ -958,14 +959,16 @@ class Analysis:
             bfc = self.cfg.get("blackfriday", {}) or {}
             w = bfc.get("window", ["11-20", "12-01"])
             found = bft["nl_deal_eur"].notna().any() or bft["de_deal_eur"].notna().any()
+            est = bool(bfc.get("estimates", True))
             md.append(f"**Black Friday quick decision** (window {w[0]} – {w[1]}, Black Friday {bfc.get('date', '')}): "
                       "per battery its best contract and strategy, today's price, the real deal price the scraper "
                       "found during the window (NL incl. VAT, DE 0% VAT from German manufacturer shops) with the "
-                      "discount against the last normal price, and the estimate "
-                      f"(−{float(bfc.get('discount_nl', 0.15)):.0%} NL / −{float(bfc.get('discount_de', 0.15)):.0%} DE). "
-                      "Sorted by the best available payback. "
+                      "discount against the last normal price"
+                      + (f", and the estimate (−{float(bfc.get('discount_nl', 0.15)):.0%} NL / "
+                         f"−{float(bfc.get('discount_de', 0.15)):.0%} DE)" if est else " (estimates switched off)")
+                      + ". Sorted by the best available payback. "
                       + ("" if found else "No real deals recorded yet: the scraper fills them in during the window "
-                         "(every 4 hours), until then the estimate columns apply."))
+                         "(every 4 hours)" + (", until then the estimate columns apply." if est else ".")))
         self.chosen = self.pick_battery(summary)
         if self.chosen is not None:
             split = self.earnings_by_strategy(self.chosen, contracts, meta)
@@ -1027,6 +1030,8 @@ class Analysis:
                 v for v in (row["payback_nl_est"], row["payback_now"]) if v is not None)
             rows.append(row)
         df = pd.DataFrame(rows).sort_values("best_payback").reset_index(drop=True)
+        if not (self.cfg.get("blackfriday", {}) or {}).get("estimates", True):
+            df = df.drop(columns=["nl_est_eur", "payback_nl_est", "payback_de_est"])
         for c in ("nl_deal_discount", "de_deal_discount"):
             df[c] = df[c].map(lambda v: f"{v:.0%}" if isinstance(v, float) and not np.isnan(v) else "")
         return df.round(2)
@@ -1295,6 +1300,12 @@ class Analysis:
         if bigger is not None and not (comp._bid == bigger["_bid"]).any():
             comp = pd.concat([comp, pd.DataFrame([bigger])], ignore_index=True)
         sec.tables["battery_comparison"] = comp.round(2)
+        classes = self.size_class_table(ranked, describe)
+        if classes is not None:
+            sec.tables["best_per_size_class"] = classes.round(2)
+        sec.summary = (f"Best choice: {b.name}" + (f" on {adv.label}" if adv is not None else "")
+                       + f" – pays back in {row.payback_years:.1f} years, saves about "
+                       f"€{row.saving_eur_year_2027:,.0f} a year from 2027.")
         md = [f"### Best choice: **{b.name}**" + (f" on **{adv.label}**" if adv is not None else ""), ""]
         md.append(f"- **Pays back fastest:** {row.payback_years:.1f} years at €{row.price_eur:,.0f} "
                   f"(€{row.eur_per_kwh_usable:,.0f} per usable kWh), net present value €{row.npv_eur:,.0f} over its life.")
@@ -1322,6 +1333,8 @@ class Analysis:
             o = others.iloc[0]
             md.append(f"- **Runner-up:** {o.battery}, {o.payback_years:.1f} years "
                       f"(€{o.eur_per_kwh_usable:,.0f} per usable kWh).")
+        if classes is not None and len(classes) > 1:
+            md.append(self.size_class_text(classes))
         combo = self.combination_table(b)
         if combo is not None:
             sec.tables["contract_and_battery_combinations"] = combo
@@ -1336,6 +1349,58 @@ class Analysis:
         sec.md = "\n".join(md)
         self.advice_charts(sec, b, dyn)
         self.emit(sec)
+
+    def size_class_table(self, ranked: pd.DataFrame, describe) -> pd.DataFrame | None:
+        """Best-value battery (fastest payback) per capacity class, e.g. 5/10/15 kWh ± 2.5,
+        with what the step up from the previous class adds."""
+        a = self.cfg.get("analysis", {})
+        centres = a.get("size_classes_kwh", [5, 10, 15])
+        half = float(a.get("size_class_halfwidth_kwh", 2.5))
+        size = {b.id: (b.nominal_kwh or b.usable_kwh) for b in self.batteries}
+        rows, prev = [], None
+        for cen in centres:
+            sel = ranked[ranked._bid.map(size).between(cen - half, cen + half, inclusive="left")]
+            if sel.empty:
+                continue
+            r = sel.iloc[0].to_dict()
+            d = describe(r)
+            row = {"size_class": f"{cen:g} kWh (±{half:g})", "battery": d["battery"],
+                   "nominal_kwh": size[r["_bid"]], "usable_kwh": d["usable_kwh"], "price_eur": d["price_eur"],
+                   "eur_per_kwh_usable": d["eur_per_kwh_usable"], "strategy": d["strategy"],
+                   "saving_eur_year_2027": d["saving_eur_year_2027"], "payback_years": d["payback_years"],
+                   "npv_eur": d["npv_eur"], "lifetime_net_saving_eur": r.get("lifetime_net_saving_eur", np.nan),
+                   "candidates": len(sel), "days_full": d["days_full"]}
+            if prev is not None:
+                ds = row["saving_eur_year_2027"] - prev["saving_eur_year_2027"]
+                dp = row["price_eur"] - prev["price_eur"]
+                row["extra_saving_vs_smaller"] = ds
+                row["extra_price_vs_smaller"] = dp
+                row["payback_of_extra_years"] = dp / ds if ds > 0 else np.inf
+            rows.append(row)
+            prev = row
+        return pd.DataFrame(rows) if rows else None
+
+    @staticmethod
+    def size_class_text(classes: pd.DataFrame) -> str:
+        best_npv = classes.loc[classes.npv_eur.idxmax()]
+        fastest = classes.loc[classes.payback_years.idxmin()]
+        lines = ["", "**Which size?** The best-value battery per size class (fastest payback within the class):"]
+        for r in classes.itertuples():
+            s = (f"- **{r.size_class}:** {r.battery}, €{r.price_eur:,.0f}, saves €{r.saving_eur_year_2027:,.0f}/yr "
+                 f"with `{r.strategy}`, pays back in {r.payback_years:.1f} years, net present value €{r.npv_eur:,.0f}")
+            extra = getattr(r, "extra_saving_vs_smaller", np.nan)
+            if isinstance(extra, float) and not np.isnan(extra):
+                pe = r.payback_of_extra_years
+                s += (f"; the step up adds €{extra:,.0f}/yr for €{r.extra_price_vs_smaller:,.0f} more"
+                      + (f" (that extra pays back in {pe:.1f} years)" if np.isfinite(pe) else " (never pays back)"))
+            lines.append(s + ".")
+        if best_npv.size_class == fastest.size_class:
+            lines.append(f"- The {fastest.size_class} class wins on both payback and lifetime value.")
+        else:
+            lines.append(f"- Fastest payback: {fastest.size_class}; most money over the battery's life (net present "
+                         f"value): {best_npv.size_class}. Pick the larger one only if you are happy to wait longer "
+                         "for the money back.")
+        return "\n".join(lines)
 
     def advice_contract(self):
         """The contract the advice is built on: the cheapest dynamic contract when price history exists."""
