@@ -50,7 +50,8 @@ class Battery:
     verified: bool = False
     notes: str = ""
     backup_w: float | None = None            # backup socket power during an outage (W)
-    grid_forming: str = ""                   # "socket only", "whole house (ATS)", "no", "" = unknown
+    outage_solar: str = ""                   # can solar keep charging it when the grid is off? "" = unknown
+    dc_solar_w: float | None = None          # DC solar (MPPT) input on the battery itself (W)
     price_bf_nl: float | None = None         # Black Friday deal NL, incl. VAT
     price_bf_de: float | None = None         # Black Friday deal DE, 0% VAT
     estimated_fields: list = field(default_factory=list)
@@ -156,7 +157,8 @@ def load_batteries(source, defaults: dict) -> list[Battery]:
             price_nl=_num(r.get("price_nl_incl_vat")), price_nl_lowest=_num(r.get("price_nl_lowest_incl_vat")),
             price_nl_lowest_date=r.get("price_nl_lowest_date", ""), price_de=_num(r.get("price_de_excl_vat")),
             extra_hardware=_num(r.get("extra_hardware_eur")) or 0.0,
-            backup_w=_num(r.get("backup_socket_w")), grid_forming=r.get("grid_forming", ""),
+            backup_w=_num(r.get("backup_socket_w")), outage_solar=r.get("outage_solar", ""),
+            dc_solar_w=_num(r.get("dc_solar_input_w")),
             price_bf_nl=_num(r.get("price_blackfriday_nl_incl_vat")),
             price_bf_de=_num(r.get("price_blackfriday_de_excl_vat")),
             source=r.get("source_url", ""), retrieved_at=r.get("retrieved_at", ""),

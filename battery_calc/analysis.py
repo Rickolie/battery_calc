@@ -475,10 +475,10 @@ class Analysis:
         src = self.inp.batteries_csv or self.path("batteries_file")
         bats = load_batteries(src, self.cfg.get("battery_defaults", {})) if src else []
         bset = self.opts.battery_set if self.opts.battery_set is not None else self.cfg.get("battery_set", "all")
-        if bset == "shortlist":
-            bset = self.cfg.get("battery_shortlist", [])
         if isinstance(bset, str) and bset != "all":
             bset = [x.strip() for x in bset.split(",") if x.strip()]
+        if isinstance(bset, list) and "shortlist" in bset:
+            bset = [x for x in bset if x != "shortlist"] + list(self.cfg.get("battery_shortlist", []))
         if isinstance(bset, list) and bset:
             bats = [b for b in bats if b.id in bset]
         rows = []
@@ -504,7 +504,7 @@ class Analysis:
                          "price_de": b.price_de, "extra_hw": b.extra_hardware,
                          "eur_per_kwh_nominal": round(b.price_nl / b.nominal_kwh) if b.price_nl and b.nominal_kwh else None,
                          "eur_per_kwh_usable": round(b.price_nl / b.usable_kwh) if b.price_nl and b.usable_kwh else None,
-                         "backup_socket_w": b.backup_w, "off_grid": b.grid_forming or "unknown",
+                         "solar_during_outage": b.outage_solar or "unknown", "dc_solar_input_w": b.dc_solar_w,
                          "missing_fields": ", ".join(b.missing_fields), "estimated_with_defaults": ", ".join(b.estimated_fields),
                          "verified": "yes" if b.verified else "no", "in_scope": "yes" if ok else "no", "note": note})
         sec.tables["battery_specs"] = pd.DataFrame(rows)
@@ -515,10 +515,13 @@ class Analysis:
               f"EoL {d.get('eol_capacity')}, warranty {d.get('warranty_years')} yr) and marks the battery as estimated."]
         for b, why in self.excluded:
             md.append(f"- Excluded: {b.name} – {why}.")
-        md.append("`off_grid`: what works without the grid. *socket only* = a backup socket on the battery feeds "
-                  "plugged-in devices during an outage (not the house wiring). Running the whole house off-grid "
-                  "(grid-forming) needs an automatic transfer switch (ATS) or a hybrid inverter fitted by an "
-                  "installer; none of these plug-in batteries offers that today. Empty = not stated by the shop.")
+        md.append("`solar_during_outage`: can solar power keep charging the battery when the grid (or the main "
+                  "switch) is off? Only batteries with their own solar input can: DC panels on the battery's MPPT "
+                  "inputs, or a micro-inverter on its backup port (Indevolt 2000 hybrid series). The existing roof "
+                  "inverter on the house wiring stops when the grid is gone; keeping it running needs a battery "
+                  "inverter that forms the grid for the house wiring behind an automatic transfer switch, with "
+                  "frequency-shift power control of the solar inverter, installed by an electrician. None of these "
+                  "plug-in batteries offers that. *not stated* = the shop only mentions a backup socket for devices.")
         nop = [b.name for b in self.batteries if not b.price_variants()]
         if nop:
             md.append(f"- No purchase price yet (payback cannot be computed): {', '.join(nop)}. "

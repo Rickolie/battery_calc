@@ -352,16 +352,26 @@ A section after data quality:
 - Per-phase peaks from the P1 columns `L1/L2/L3 max W` when present (configurable in `p1.phase_max_columns`).
 - A power-duration chart (hours per year above each power, for import and export) with the 0.8 kW socket limit and 2.4 kW marked.
 
-### 11.3 Outage and off-grid capability
+### 11.3 Solar charging when the grid is off
+
+Goal: when the grid fails or the main house switch is off, the battery should form its own small grid so solar power can still charge it. Continuous power for the house is not required, and a backup socket for appliances is not the goal.
 
 Two battery fields:
 
 | Field | Meaning |
 | --- | --- |
-| `backup_socket_w` | Power of the battery's own backup socket during a grid outage (W). |
-| `grid_forming` | `socket only` = plugged-in devices keep running on the backup socket; `whole house (ATS)` = the battery can run the house wiring off-grid through an automatic transfer switch or hybrid inverter; `no`; empty = not stated by the shop. |
+| `outage_solar` | Can solar power keep charging the battery without the grid? `yes: DC panels on the battery` = panels on the battery's own MPPT inputs; `yes: … micro-inverter on the backup port` = an AC micro-inverter with panels on the battery's backup output; `not stated` = the shop only mentions a backup socket for devices; empty = unknown. |
+| `dc_solar_input_w` | Total DC solar input (MPPT) on the battery, in W. |
 
-Continuous power during an outage is not required, so the socket power is reported for information only and does not filter batteries. Running the house without the grid needs an installer-fitted transfer switch or a hybrid inverter, whether the connection is 1- or 3-phase; plug-in batteries offer only a backup socket.
+Notes shown in the report:
+
+- The existing roof inverter is connected to the house wiring and switches off when the grid is gone (anti-islanding). To keep it producing, an installer would have to fit:
+  - a battery inverter that forms the grid for the house wiring;
+  - an automatic transfer switch that separates the house from the public grid;
+  - a solar inverter that follows frequency-shift power control, so it stops when the battery is full.
+- No plug-in battery in the dataset offers this.
+- Plug-in batteries that do keep charging from solar during an outage do so through their own solar input. In the current dataset that is the Indevolt PowerFlex/SolidFlex 2000 hybrid series (4 MPPT inputs, 2400 W). The shop states that the PowerFlex 2000 also accepts a micro-inverter on its backup port. Those panels must be wired to the battery, not to the roof inverter.
+- `backup_socket_w` (power of the backup socket) stays in the data for information but is not reported.
 
 ### 11.4 Yearly earnings per strategy (stacked)
 

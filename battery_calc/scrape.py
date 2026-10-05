@@ -131,6 +131,21 @@ def shop_price(page: str, url: str, match: str) -> float | None:
     123accu.nl (product blocks)."""
     import html as htmllib
     prices = []
+    if "thuisbatterij.nl" in url and match.startswith("ajax:"):
+        # Too many variations to embed: ask WooCommerce for one exact combination.
+        pid = re.search(r'data-product_id="(\d+)"', page)
+        if not pid:
+            return None
+        data = {"product_id": pid.group(1)}
+        for part in match[5:].split(";"):
+            k, _, v = part.partition("=")
+            data[k.strip()] = v.strip()
+        import urllib.parse
+        req = urllib.request.Request("https://thuisbatterij.nl/?wc-ajax=get_variation",
+                                     data=urllib.parse.urlencode(data).encode(), headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            v = json.loads(r.read() or b"null")
+        return float(v["display_price"]) if isinstance(v, dict) and v.get("display_price") else None
     if "thuisbatterij.nl" in url:
         m = re.search(r'data-product_variations="([^"]*)"', page)
         if m:
@@ -174,10 +189,11 @@ def scrape_battery_prices(cfg: dict) -> str:
 
     for i, r in df.iterrows():
         found = []
-        for entry in r["shop_urls"].split():
+        entries = [e for e in re.split(r"\s+(?=https?://)", r["shop_urls"].strip()) if e]
+        for entry in entries:
             url, _, match = entry.partition("|")
             try:
-                p = shop_price(get(url), url, match.replace("_", " "))
+                p = shop_price(get(url), url, match if match.startswith("ajax:") else match.replace("_", " "))
                 if p:
                     found.append((p, url))
                 else:
