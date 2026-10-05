@@ -28,6 +28,7 @@ legend{font-weight:700;padding:0 6px}
 .help{color:var(--muted);font-size:.85rem;margin:4px 0 0;line-height:1.4}
 .ichart{margin:8px 0;background:#fff;border-radius:6px;color:#222}.zoomhint{font-size:.8rem;color:var(--muted);margin:0 0 12px}
 #advice{border:2px solid var(--accent);border-radius:10px;padding:0 12px}
+#toc{columns:2 320px;font-size:.9rem;margin:4px 0 12px}
 .cols{font-size:.8rem;margin:4px 0 16px}.cols summary{cursor:pointer;color:var(--muted)}
 .cols dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;margin:6px 0}
 .cols dt{font-family:ui-monospace,monospace;font-weight:600;overflow-wrap:anywhere}.cols dd{margin:0;color:var(--fg)}
@@ -186,6 +187,9 @@ code{background:var(--card);padding:0 3px;border-radius:3px}
 
   <div id="step4" class="hidden">
     <h2>Step 4 – results</h2>
+    <p class="muted">Sections appear as soon as they are computed. The battery payback (step 7) takes most of the
+      time; the advice and the pottery-kiln section follow after it. The list below shows the progress.</p>
+    <ul id="toc"></ul>
     <p class="downloads" id="downloads"></p>
     <div id="results"></div>
   </div>

@@ -93,11 +93,40 @@ function contractForm() {
   return any ? f : null;
 }
 
+// Every section the analysis produces, in order; shown as a live contents list.
+const SECTIONS = [
+  ["advice", "Advice – which battery, which contract, and why"], ["data", "1. Data quality"],
+  ["power", "1b. Power profile"], ["current", "2. Current contract"],
+  ["contracts", "3. Objective 2 – best contract without a battery"], ["batteries", "4. Battery dataset"],
+  ["breakeven", "5. Objective 1 – break-even price per battery"], ["sanity", "6. Self-consumption sanity check"],
+  ["payback", "7. Objective 3 – battery payback per strategy (slowest step)"],
+  ["breakeven_recomputed", "8. Objective 1 recomputed with simulated cycles"],
+  ["kiln", "9. Objective 4 – pottery kiln on free power"],
+];
+
+function renderToc() {
+  const ul = document.createElement("ul");
+  ul.id = "toc";
+  for (const [id, title] of SECTIONS) {
+    const li = document.createElement("li");
+    li.id = "toc-" + id;
+    li.innerHTML = `<span class="muted">${esc(title)} – computing…</span>`;
+    ul.appendChild(li);
+  }
+  $("toc").replaceWith(ul);
+}
+
+function tocDone(sec) {
+  const li = document.getElementById("toc-" + sec.id);
+  if (li) li.innerHTML = `<a href="#${sec.id}">${esc(sec.title)}</a> ✓`;
+}
+
 $("run").onclick = () => {
   $("run").disabled = true;
   state.csv = {}; state.sections = [];
   $("results").innerHTML = ""; $("downloads").innerHTML = "";
   show("step4");
+  renderToc();
   status("Running… sections appear as they are computed.");
   const settings = {
     use_ricks: state.useRicks, label: state.useRicks ? "Rick's data" : "Uploaded data",
@@ -125,7 +154,9 @@ function onSection(sec) {
   // The recommendation goes to the top; everything else in order of arrival.
   if (sec.id === "advice") $("results").prepend(div); else $("results").appendChild(div);
   if (window.renderInteractiveCharts) window.renderInteractiveCharts(div);
-  status(`Computed: ${sec.title}`);
+  tocDone(sec);
+  const next = SECTIONS.find(([id]) => !document.getElementById(id) && id !== "advice");
+  status(`Computed: ${sec.title}` + (next ? ` – now working on: ${next[1]}` : ""));
 }
 
 function downloadLink(name, text, type) {
