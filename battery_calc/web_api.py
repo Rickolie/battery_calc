@@ -58,10 +58,17 @@ def run(settings_json: str, on_section=None, config_path: str = "config.yaml") -
             inputs.fixed_contract = contract_from_form(form)
         else:
             inputs.no_current_contract = True
+    bf = s.get("blackfriday") or {}
+    for k in ("discount_nl", "discount_de"):
+        if bf.get(k) is not None:
+            cfg.setdefault("blackfriday", {})[k] = float(bf[k])
+    kiln = {k: float(v) for k, v in (s.get("kiln") or {}).items() if v not in (None, "")}
     opts = Options(connection=s.get("connection", cfg["connection"]["default"]),
                    margin=float(s.get("margin", cfg["connection"]["margin"])),
                    price_variant=s.get("price_variant", "all"), quick=bool(s.get("quick", False)),
-                   plots=True, feed_in_2030=s.get("feed_in_2030"))
+                   plots=True, feed_in_2030=s.get("feed_in_2030"),
+                   chosen_battery=s.get("chosen_battery") or None, battery_set=s.get("battery_set") or None,
+                   kiln=kiln or None)
 
     def emit(sec):
         if on_section is None:

@@ -111,3 +111,82 @@ def savings_years(series: dict, title: str) -> bytes:
     ax.set_title(title)
     ax.legend(fontsize=8)
     return _png(fig)
+
+
+def power_duration(imp_sorted, exp_sorted, marks) -> bytes:
+    """Load-duration curves: how many hours per year import/export exceed a power."""
+    fig, ax = plt.subplots(figsize=(8, 3.6))
+    for arr, label, col in ((imp_sorted, "Import", PALETTE[0]), (exp_sorted, "Export (solar surplus)", PALETTE[1])):
+        hrs = np.arange(1, len(arr) + 1) * 0.25
+        ax.plot(hrs, arr, color=col, label=label)
+    for m in marks:
+        ax.axhline(m, color="grey", ls=":", lw=1)
+        ax.annotate(f"{m:g} kW", (ax.get_xlim()[1] * 0.98, m), ha="right", va="bottom", fontsize=8, color="grey")
+    ax.set_xlabel("hours per year at or above this power")
+    ax.set_ylabel("kW (15-min average)")
+    ax.set_title("Power duration curve")
+    ax.legend(fontsize=8)
+    return _png(fig)
+
+
+EARN_PARTS = [("avoided_import", "Avoided import", "#2a6f97"), ("sold_to_grid", "Sold to grid", "#81b29a"),
+              ("solar_feed_in_given_up", "Feed-in given up (stored solar)", "#e07a5f"),
+              ("grid_charging", "Grid charging", "#9c6644"), ("standby_and_other", "Standby / other", "#8d8d8d")]
+
+
+def earnings_stacked(tbl, title) -> bytes:
+    """One panel per strategy: stacked yearly earnings (positive up, costs down)."""
+    strategies = list(dict.fromkeys(tbl["strategy"]))
+    n = len(strategies)
+    cols = min(n, 3)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(4.2 * cols, 3.2 * rows), sharey=True, squeeze=False)
+    for ax, strat in zip(axes.flat, strategies):
+        g = tbl[tbl.strategy == strat]
+        x = np.arange(len(g))
+        pos = np.zeros(len(g))
+        neg = np.zeros(len(g))
+        for key, label, col in EARN_PARTS:
+            v = g[key].values
+            up = np.where(v > 0, v, 0)
+            dn = np.where(v < 0, v, 0)
+            ax.bar(x, up, bottom=pos, color=col, label=label, width=0.75)
+            ax.bar(x, dn, bottom=neg, color=col, width=0.75)
+            pos += up
+            neg += dn
+        ax.plot(x, g["net_saving"].values, "o", color="black", ms=4, label="Net saving")
+        ax.axhline(0, color="black", lw=0.6)
+        ax.set_xticks(x)
+        ax.set_xticklabels(g["year"].astype(str), rotation=90, fontsize=7)
+        ax.set_title(strat, fontsize=9)
+    for ax in list(axes.flat)[n:]:
+        ax.axis("off")
+    axes[0, 0].set_ylabel("€ per year")
+    h, l = axes[0, 0].get_legend_handles_labels()
+    seen = dict(zip(l, h))
+    fig.legend(seen.values(), seen.keys(), loc="lower center", ncol=3, fontsize=8, frameon=False)
+    fig.suptitle(f"Yearly earnings per strategy – {title}", fontsize=10)
+    fig.tight_layout(rect=(0, 0.08 + 0.02 * rows, 1, 0.95))
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=110)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def kiln_days(summ, battery_name, label) -> bytes:
+    fig, ax = plt.subplots(figsize=(8, 3.8))
+    x = summ["kiln_kw"].values
+    ax.plot(x, summ["free_days_no_battery"], "o-", color=PALETTE[1], label="Solar surplus only")
+    key = f"free_days_{label}"
+    if key in summ:
+        ax.plot(x, summ[key], "o-", color=PALETTE[0], label=f"Surplus + {battery_name}")
+    ax.set_xlabel("kiln rated power (kW)")
+    ax.set_ylabel("free firing days per year")
+    ax.set_title("Pottery kiln: days per year a full firing runs on free power")
+    ax2 = ax.twinx()
+    ax2.bar(x, summ["firing_kwh"], width=0.25, color="grey", alpha=0.25, label="energy per firing")
+    ax2.set_ylabel("kWh per firing", color="grey")
+    ax.set_zorder(ax2.get_zorder() + 1)
+    ax.patch.set_visible(False)
+    ax.legend(fontsize=8, loc="upper right")
+    return _png(fig)

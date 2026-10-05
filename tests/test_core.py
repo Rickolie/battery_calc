@@ -318,3 +318,59 @@ def test_hbc_extreme_pair_matching():
     assert (capped == GRID_CHARGE).sum() == 2 and (capped[72:76] == SELF).all()
     flat = plan_hbc(idx, np.full(96, 0.2), {"min_delta": 0.06})
     assert (flat == CHARGE_PV).all()
+
+
+# ---------------------------------------------------------------- additions (Specs.txt section 11)
+
+def test_min_price_difference():
+    from battery_calc.extras import min_price_difference
+    assert min_price_difference(0.0, 0.85, 0.13) == pytest.approx(0.13)
+    assert min_price_difference(0.20, 1.0, 0.0) == pytest.approx(0.0)
+    # break-even minus charge price
+    assert min_price_difference(0.2, 0.85, 0.1) == pytest.approx(0.2 / 0.85 + 0.1 - 0.2)
+
+
+def test_earnings_split_closes_to_saving():
+    from battery_calc.extras import earnings_split
+    b = make_battery()
+    net = random_net()
+    r = simulate(net, SELF, b, 4600)
+    u = np.full(len(net), 0.3)
+    s = np.full(len(net), 0.07)
+    saving = float(((np.maximum(net, 0) - r.imp) * u - (np.maximum(-net, 0) - r.exp) * s).sum())
+    parts = earnings_split(net, r.batt_ac, b.standby_w / 4000, u, s, saving)
+    assert sum(parts.values()) == pytest.approx(saving)
+    assert parts["avoided_import"] > 0 and parts["solar_feed_in_given_up"] < 0
+    assert abs(parts["standby_and_other"]) < 0.05 * abs(saving) + 5   # only standby remains
+
+
+def test_black_friday_variants():
+    b = make_battery(price_nl=1210.0)
+    v = b.price_variants(50.0, {"discount_nl": 0.1, "discount_de": 0.2, "vat": 0.21})
+    assert v["NL Black Friday (est.)"] == pytest.approx(1089.0)
+    assert v["DE Black Friday (est.)"] == pytest.approx(1000 * 0.8 + 50)
+    b.price_bf_nl = 999.0
+    assert b.price_variants(0.0, {})["NL Black Friday"] == pytest.approx(999.0)
+
+
+def test_kiln_days_battery_helps_and_bigger_kiln_fewer_days(profile):
+    from battery_calc.extras import kiln_days
+    pr, _ = profile
+    june = pr.loc["2026-06"]
+    b = make_battery(usable_kwh=5.0, max_charge_w=2500, max_discharge_w=2500, standby_w=0)
+    soc = np.full(len(june), 2.5)
+    nb = kiln_days(june, None, 0, None, [1.5, 4.5], 8, 0.7, [8, 9, 10], 0.05)
+    wb = kiln_days(june, b, 4600, soc, [1.5, 4.5], 8, 0.7, [8, 9, 10], 0.05)
+    small_nb, big_nb = (nb[nb.kiln_kw == p].free.sum() for p in (1.5, 4.5))
+    small_wb = wb[wb.kiln_kw == 1.5].free.sum()
+    assert small_nb >= big_nb
+    assert small_wb >= small_nb
+
+
+def test_power_profile_shares(profile):
+    from battery_calc.extras import power_profile
+    pr, _ = profile
+    real = (pr["flag"] != "synthetic").values
+    stats, cover, _, _, _ = power_profile(pr, real)
+    shares = cover["share_of_surplus_it_can_store"].values
+    assert np.all(np.diff(shares) >= 0) and shares[-1] <= 1.0 + 1e-9

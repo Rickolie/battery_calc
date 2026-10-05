@@ -28,6 +28,7 @@ p1:
   export_t1: Export T1 kWh
   export_t2: Export T2 kWh
   max_interpolate_gap_minutes: 60
+  phase_max_columns: [L1 max W, L2 max W, L3 max W]   # optional per-phase peaks (power profile)
 
 pv:
   time_column: time
@@ -183,3 +184,33 @@ strategies:
     discharge_starts: [7, 17, 18, 19]
   perfect_foresight:
     soc_levels: 21
+
+# Black Friday price variants (Specs.txt 11.5). Real deal prices go in
+# batteries.csv (price_blackfriday_nl_incl_vat / price_blackfriday_de_excl_vat);
+# until then a discount on the current price is used and labelled "(est.)".
+# DE without a known German price: NL price without VAT, minus the discount.
+blackfriday:
+  enabled: true
+  date: '2026-11-27'
+  discount_nl: 0.15
+  discount_de: 0.15
+  vat: 0.21
+
+# Battery choice for Objective 4 and the earnings split (Specs.txt 11.4, 11.6).
+# null = the battery with the fastest headline payback.
+chosen_battery: null
+# Batteries simulated in a run: all, shortlist, or a list of ids.
+battery_set: all
+battery_shortlist: [marstek_v3_5, marstek_v3_5_plug, marstek_v3_10, marstek_venus_a_4, anker_max_7,
+                    ecoflow_stream_5, indevolt_sf3000_5, hoymiles_4020, homewizard_2_7, zendure_2400acplus_5]
+
+# Objective 4: pottery kiln on free power (Specs.txt 11.6). Assumptions, edit
+# to the kiln's data sheet: a firing to maximum temperature (~1250-1300 C)
+# takes firing_hours, and the kiln draws avg_duty x rated power on average.
+kiln:
+  powers_kw: [1.5, 2.0, 2.5, 3.0, 3.6, 4.5, 5.5, 7.5, 9.0, 11.0]
+  firing_hours: 8
+  avg_duty: 0.7
+  start_hours: [6, 7, 8, 9, 10, 11]
+  free_tolerance: 0.05       # a firing counts as free if <= 5% of its energy comes from the grid
+  single_phase_max_kw: 3.68  # above this a kiln needs a three-phase connection

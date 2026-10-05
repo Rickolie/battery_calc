@@ -24,6 +24,10 @@ def build_parser(cfg_default_conn="3x25"):
     p.add_argument("--quick", action="store_true", help="headline years only")
     p.add_argument("--no-plots", action="store_true")
     p.add_argument("--out", default=None, help="results directory (default from config)")
+    p.add_argument("--batteries", default=None, help="all, shortlist, or comma-separated battery ids")
+    p.add_argument("--battery", default=None, help="chosen battery id for the earnings split and the kiln objective")
+    p.add_argument("--kiln-hours", type=float, default=None, help="hours of a firing to maximum temperature")
+    p.add_argument("--kiln-duty", type=float, default=None, help="average share of rated power drawn during a firing")
     return p
 
 
@@ -35,7 +39,10 @@ def main(argv=None):
     if args.out:
         cfg["paths"]["results_dir"] = args.out
     opts = Options(connection=conn, margin=margin, price_variant=args.price_variant, quick=args.quick,
-                   plots=not args.no_plots, feed_in_2030=args.feed_in_2030)
+                   plots=not args.no_plots, feed_in_2030=args.feed_in_2030, chosen_battery=args.battery,
+                   battery_set=args.batteries,
+                   kiln={k: v for k, v in (("firing_hours", args.kiln_hours), ("avg_duty", args.kiln_duty))
+                         if v is not None} or None)
     inputs = Inputs(p1=args.p1, pv=args.pv, no_current_contract=args.no_current_contract,
                     label="Rick's data" if not args.p1 else f"P1 file {args.p1}")
 

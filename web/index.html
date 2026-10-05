@@ -81,6 +81,18 @@ code{background:var(--card);padding:0 3px;border-radius:3px}
         <select id="variant"><option value="all">All variants</option><option>NL current</option><option>NL lowest-ever</option><option>DE 0% VAT (scenario)</option></select></div>
       <div><label for="fi2030">Feed-in minimum from 2030</label>
         <select id="fi2030"><option value="0">0% (default)</option><option value="0.3">30% (sensitivity)</option></select></div>
+      <div><label for="bset">Batteries to compare</label>
+        <select id="bset"><option value="shortlist">Shortlist (10, faster)</option><option value="all">All batteries</option></select></div>
+      <div><label for="chosen">Battery for the earnings split and the kiln</label>
+        <select id="chosen"><option value="">Fastest payback (automatic)</option></select></div>
+      <div><label for="bfnl">Black Friday discount NL (estimate)</label>
+        <input id="bfnl" inputmode="decimal" value="15"> %</div>
+      <div><label for="bfde">Black Friday discount DE (estimate)</label>
+        <input id="bfde" inputmode="decimal" value="15"> %</div>
+      <div><label for="kh">Kiln: hours to maximum temperature</label>
+        <input id="kh" inputmode="decimal" value="8"></div>
+      <div><label for="kd">Kiln: average share of rated power</label>
+        <input id="kd" inputmode="decimal" value="70"> %</div>
       <div><label for="quick">Price years</label>
         <select id="quick"><option value="0">Full history 2013–2026 + last 3 years</option><option value="1">Last 3 years only (faster)</option></select></div>
     </div>

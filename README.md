@@ -9,7 +9,10 @@ answer three questions:
 2. **Objective 2:** which contract (fixed or dynamic) is cheapest without a
    battery: under 2026 rules (saldering), 2027–2029 rules (no saldering, 50%
    feed-in minimum) and 2030+ rules.
-3. **Objective 3:** which battery × strategy × contract pays back fastest.
+3. **Objective 3:** which battery × strategy × contract pays back fastest, with yearly earnings per strategy split by source.
+4. **Objective 4:** which pottery-kiln size can fire on free solar power, and on how many days per year.
+
+The report also shows the power profile, the minimum price difference worth charging per battery, outage (backup socket) capability, and Black Friday price variants (Specs.txt section 11).
 
 The same Python package runs as a CLI and, through Pyodide, as a static
 website on GitHub Pages.
@@ -28,7 +31,7 @@ The report is written to `results/report.md` and `results/report.html`, with
 CSVs in `results/csv/` and charts in `results/figures/`.
 `results/breakeven.csv` holds the per-battery break-even values (Objective 1).
 
-Options: `--p1`, `--pv`, `--no-current-contract`, `--price-variant`,
+Options: `--batteries all|shortlist|id,id`, `--battery <id>` (earnings split and kiln), `--kiln-hours`, `--kiln-duty`, `--p1`, `--pv`, `--no-current-contract`, `--price-variant`,
 `--feed-in-2030 0.3` (2030+ sensitivity), `--no-plots`, `--out`, `--config`.
 
 ## Inputs

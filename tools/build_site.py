@@ -54,6 +54,16 @@ def vendor_pyodide(dist, out):
     return sorted(need)
 
 
+def batteries_for_manifest(cfg):
+    import csv
+    path = os.path.join(ROOT, cfg["paths"]["batteries_file"])
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return [{"id": r["id"], "name": f"{r['brand']} {r['model']}", "price": r.get("price_nl_incl_vat", "")}
+                for r in csv.DictReader(f)]
+
+
 def last_update(paths):
     try:
         out = subprocess.run(["git", "log", "-1", "--format=%cs", "--", *paths], cwd=ROOT,
@@ -95,6 +105,9 @@ def main():
         "ricks_data": any(r.endswith(os.path.basename(cfg["paths"]["p1_file"])) for r in ricks),
         "connections": cfg["connection"]["options"], "default_connection": cfg["connection"]["default"],
         "online_updated_at": last_update(["data/online"]), "pyodide_packages": vendored,
+        "batteries": batteries_for_manifest(cfg),
+        "battery_shortlist": cfg.get("battery_shortlist", []),
+        "blackfriday": cfg.get("blackfriday", {}), "kiln": cfg.get("kiln", {}),
     }
     with open(os.path.join(out, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)

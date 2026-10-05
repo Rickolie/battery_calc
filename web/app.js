@@ -27,6 +27,20 @@ function onReady(manifest) {
     if (c === manifest.default_connection) o.selected = true;
     sel.appendChild(o);
   }
+  for (const b of manifest.batteries || []) {
+    if (!b.price) continue;
+    const o = document.createElement("option");
+    o.value = b.id; o.textContent = `${b.name} (€ ${Math.round(Number(b.price))})`;
+    $("chosen").appendChild(o);
+  }
+  if (manifest.blackfriday) {
+    if (manifest.blackfriday.discount_nl != null) $("bfnl").value = Math.round(manifest.blackfriday.discount_nl * 100);
+    if (manifest.blackfriday.discount_de != null) $("bfde").value = Math.round(manifest.blackfriday.discount_de * 100);
+  }
+  if (manifest.kiln) {
+    if (manifest.kiln.firing_hours != null) $("kh").value = manifest.kiln.firing_hours;
+    if (manifest.kiln.avg_duty != null) $("kd").value = Math.round(manifest.kiln.avg_duty * 100);
+  }
   $("useRick").disabled = !manifest.ricks_data;
   if (!manifest.ricks_data) $("useRick").title = "Rick's data is not published with this site";
   $("useMine").disabled = false;
@@ -67,6 +81,9 @@ function onValidated(r) {
 
 $("toSettings").onclick = () => show("step3");
 
+function num(id) { const v = parseFloat($(id).value.replace(",", ".")); return isNaN(v) ? null : v; }
+function pct(id) { const v = num(id); return v == null ? null : v / 100; }
+
 function contractForm() {
   const v = (id) => $(id).value.trim().replace(",", ".");
   const f = { supplier: $("c_supplier").value.trim(), price_t1: v("c_t1"), price_t2: v("c_t2"), price_single: v("c_single"),
@@ -88,6 +105,9 @@ $("run").onclick = () => {
     contract: state.useRicks ? null : contractForm(),
     connection: $("connection").value, margin: parseFloat($("margin").value), price_variant: $("variant").value,
     feed_in_2030: parseFloat($("fi2030").value), quick: $("quick").value === "1",
+    battery_set: $("bset").value, chosen_battery: $("chosen").value,
+    blackfriday: { discount_nl: pct("bfnl"), discount_de: pct("bfde") },
+    kiln: { firing_hours: num("kh"), avg_duty: pct("kd") },
   };
   worker.postMessage({ cmd: "run", settings });
 };

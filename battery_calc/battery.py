@@ -49,6 +49,10 @@ class Battery:
     retrieved_at: str = ""
     verified: bool = False
     notes: str = ""
+    backup_w: float | None = None            # backup socket power during an outage (W)
+    grid_forming: str = ""                   # "socket only", "whole house (ATS)", "no", "" = unknown
+    price_bf_nl: float | None = None         # Black Friday deal NL, incl. VAT
+    price_bf_de: float | None = None         # Black Friday deal DE, 0% VAT
     estimated_fields: list = field(default_factory=list)
     missing_fields: list = field(default_factory=list)
 
@@ -60,7 +64,9 @@ class Battery:
     def estimated(self) -> bool:
         return bool(self.estimated_fields)
 
-    def price_variants(self, de_travel: float = 0.0) -> dict:
+    def price_variants(self, de_travel: float = 0.0, bf: dict | None = None) -> dict:
+        """Purchase price per scenario. Black Friday prices use the real deal when
+        known, otherwise a configured discount on the current price ("est.")."""
         out = {}
         if self.price_nl is not None:
             out["NL current"] = self.price_nl + self.extra_hardware
@@ -68,6 +74,20 @@ class Battery:
             out["NL lowest-ever"] = self.price_nl_lowest + self.extra_hardware
         if self.price_de is not None:
             out["DE 0% VAT (scenario)"] = self.price_de + self.extra_hardware + de_travel
+        if bf is not None and bf.get("enabled", True):
+            vat = float(bf.get("vat", 0.21))
+            if self.price_bf_nl is not None:
+                out["NL Black Friday"] = self.price_bf_nl + self.extra_hardware
+            elif self.price_nl is not None:
+                out["NL Black Friday (est.)"] = self.price_nl * (1 - float(bf.get("discount_nl", 0.15))) + self.extra_hardware
+            if self.price_bf_de is not None:
+                out["DE Black Friday"] = self.price_bf_de + self.extra_hardware + de_travel
+            else:
+                base = self.price_de if self.price_de is not None else (
+                    self.price_nl / (1 + vat) if self.price_nl is not None else None)
+                if base is not None:
+                    out["DE Black Friday (est.)"] = (base * (1 - float(bf.get("discount_de", 0.15)))
+                                                     + self.extra_hardware + de_travel)
         return out
 
 
@@ -136,6 +156,9 @@ def load_batteries(source, defaults: dict) -> list[Battery]:
             price_nl=_num(r.get("price_nl_incl_vat")), price_nl_lowest=_num(r.get("price_nl_lowest_incl_vat")),
             price_nl_lowest_date=r.get("price_nl_lowest_date", ""), price_de=_num(r.get("price_de_excl_vat")),
             extra_hardware=_num(r.get("extra_hardware_eur")) or 0.0,
+            backup_w=_num(r.get("backup_socket_w")), grid_forming=r.get("grid_forming", ""),
+            price_bf_nl=_num(r.get("price_blackfriday_nl_incl_vat")),
+            price_bf_de=_num(r.get("price_blackfriday_de_excl_vat")),
             source=r.get("source_url", ""), retrieved_at=r.get("retrieved_at", ""),
             verified=str(r.get("verified", "")).lower() in ("yes", "true", "1"), notes=r.get("notes", ""),
         )

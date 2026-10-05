@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from . import charts
+from . import charts, extras
 from .battery import (GRID_CHARGE, SELF, ZERO_IMPORT, Battery, in_scope, load_batteries, perfect_foresight,
                       plan_dynamic, plan_hbc, plan_timed, simulate)
 from .breakeven import breakeven_rows, wear_cost
@@ -57,6 +57,9 @@ class Options:
     quick: bool = False                # headline years only, fewer variants
     plots: bool = True
     feed_in_2030: float | None = None  # override the 2030+ minimum fraction
+    chosen_battery: str | None = None  # Objective 4 / earnings split; None = config or best payback
+    battery_set: str | list | None = None  # all | shortlist | [ids]; None = config
+    kiln: dict | None = None           # overrides for the kiln section of config.yaml
 
 
 class Analysis:
@@ -96,12 +99,14 @@ class Analysis:
     # ------------------------------------------------------------------ run
     def run(self) -> list[Section]:
         self.step_load()
+        self.step_power()
         self.step_current_contract()
         self.step_contracts()
         self.step_batteries()
         self.step_breakeven()
         self.step_sanity()
         self.step_payback()
+        self.step_kiln()
         return self.sections
 
     # ------------------------------------------------------------------ step 1
@@ -469,6 +474,13 @@ class Analysis:
         sec = Section("batteries", "4. Battery dataset")
         src = self.inp.batteries_csv or self.path("batteries_file")
         bats = load_batteries(src, self.cfg.get("battery_defaults", {})) if src else []
+        bset = self.opts.battery_set if self.opts.battery_set is not None else self.cfg.get("battery_set", "all")
+        if bset == "shortlist":
+            bset = self.cfg.get("battery_shortlist", [])
+        if isinstance(bset, str) and bset != "all":
+            bset = [x.strip() for x in bset.split(",") if x.strip()]
+        if isinstance(bset, list) and bset:
+            bats = [b for b in bats if b.id in bset]
         rows = []
         self.batteries, self.excluded = [], []
         for b in bats:
@@ -492,6 +504,7 @@ class Analysis:
                          "price_de": b.price_de, "extra_hw": b.extra_hardware,
                          "eur_per_kwh_nominal": round(b.price_nl / b.nominal_kwh) if b.price_nl and b.nominal_kwh else None,
                          "eur_per_kwh_usable": round(b.price_nl / b.usable_kwh) if b.price_nl and b.usable_kwh else None,
+                         "backup_socket_w": b.backup_w, "off_grid": b.grid_forming or "unknown",
                          "missing_fields": ", ".join(b.missing_fields), "estimated_with_defaults": ", ".join(b.estimated_fields),
                          "verified": "yes" if b.verified else "no", "in_scope": "yes" if ok else "no", "note": note})
         sec.tables["battery_specs"] = pd.DataFrame(rows)
@@ -502,6 +515,10 @@ class Analysis:
               f"EoL {d.get('eol_capacity')}, warranty {d.get('warranty_years')} yr) and marks the battery as estimated."]
         for b, why in self.excluded:
             md.append(f"- Excluded: {b.name} – {why}.")
+        md.append("`off_grid`: what works without the grid. *socket only* = a backup socket on the battery feeds "
+                  "plugged-in devices during an outage (not the house wiring). Running the whole house off-grid "
+                  "(grid-forming) needs an automatic transfer switch (ATS) or a hybrid inverter fitted by an "
+                  "installer; none of these plug-in batteries offers that today. Empty = not stated by the shop.")
         nop = [b.name for b in self.batteries if not b.price_variants()]
         if nop:
             md.append(f"- No purchase price yet (payback cannot be computed): {', '.join(nop)}. "
@@ -543,7 +560,8 @@ class Analysis:
         avg, c = self.avg_prices()
         d = self.cfg.get("battery_defaults", {})
         rows = breakeven_rows(self.batteries, d, avg["saldering"][0], avg["saldering"][1], avg["nosal_min50"][1],
-                              cycles=cycles, de_travel=d.get("de_travel_cost_eur", 0.0))
+                              cycles=cycles, de_travel=d.get("de_travel_cost_eur", 0.0),
+                              bf=self.cfg.get("blackfriday"))
         sid = "breakeven" if cycles is None else "breakeven_recomputed"
         sec = Section(sid, ("5. Objective 1 – break-even price per battery" if cycles is None
                             else "8. Objective 1 recomputed with simulated cycles") + title_suffix)
@@ -572,6 +590,74 @@ class Analysis:
             df.to_csv(os.path.join(out_dir, "breakeven.csv" if cycles is None else "breakeven_recomputed.csv"),
                       index=False)
         self.breakeven_df = df
+        if len(df):
+            nl = df[df.price_variant == "NL current"]
+            wear = dict(zip(nl.battery_id, nl.wear_eur_kwh))
+            cheap = self.typical_cheap_price()
+            md_rows = extras.min_difference_rows(self.batteries, wear, cheap, self.taxes.vat)
+            if md_rows:
+                sec.tables["minimum_price_difference"] = pd.DataFrame(md_rows)
+                sec.md += ("\n\n**Minimum price difference worth charging** = charge price × (1/RTE − 1) + wear "
+                           "(€/kWh, all-in). The `at_charge_x` columns give it for charging at price x. "
+                           f"`setting_*` is the value to enter in a battery app or Home Assistant (`min_delta`) for a "
+                           f"typical cheap hour (€{cheap:.3f}/kWh all-in, the average of each day's 4 cheapest hours on "
+                           "the cheapest dynamic contract, 2027 rules, last 3 years): `setting_all_in` if the app "
+                           "compares prices incl. taxes, `setting_spot` if it compares spot (EPEX) prices "
+                           "(all-in difference ÷ 1.21, because taxes per kWh are equal every hour).")
+        self.emit(sec)
+
+    def cheapest_dynamic(self):
+        dyn = [c for c in self.contracts if c.is_dynamic]
+        if not dyn or self.prices is None or not self.head_years:
+            return None
+        def key(c):
+            v = [x[0].total - x[0].bonus_amortised for y, x in self.contract_year_costs(c, "nosal_min50").items()
+                 if y in self.head_years]
+            return np.mean(v) if v else np.inf
+        return min(dyn, key=key)
+
+    def typical_cheap_price(self, hours: int = 4) -> float:
+        c = self.cheapest_dynamic()
+        if c is None:
+            return 0.20
+        vals = []
+        for _, per, idx, _ in self.periods(c, "nosal_min50", self.head_years):
+            u, _s = marginal_values(per, c, self.regimes["nosal_min50"], self.taxes, self.net_importer)
+            day = pd.Series(u, index=idx).groupby(idx.date)
+            vals.append(day.apply(lambda x: np.sort(x.values)[:hours * 4].mean()).mean())
+        return float(np.mean(vals)) if vals else 0.20
+
+    # ------------------------------------------------------------------ step 1b
+    def step_power(self):
+        sec = Section("power", "1b. Power profile")
+        raw = None
+        src = self.inp.p1 or self.path("p1_file")
+        cols = self.cfg["p1"].get("phase_max_columns") or []
+        if cols and isinstance(src, str) and os.path.exists(src):
+            try:
+                raw = pd.read_csv(src, usecols=lambda c: c in cols)
+            except Exception:
+                raw = None
+        stats, cover, phases, imp_s, exp_s = extras.power_profile(self.profile, self.real_mask, raw, cols)
+        sec.tables["import_export_power"] = stats.round(2)
+        sec.tables["battery_power_vs_energy"] = cover.round(3)
+        if phases is not None:
+            sec.tables["peak_per_phase"] = phases.round(2)
+        c8 = cover.set_index("battery_power_kw")
+        md = ["Power from the 15-minute meter data (real months only). A battery can only store surplus or cover "
+              "load up to its own power, so `battery_power_vs_energy` shows how much of the yearly surplus a battery "
+              "of that power can store, and how much of the import it can cover.",
+              f"- An 800 W socket battery can store {c8.loc[0.8, 'share_of_surplus_it_can_store']:.0%} of the surplus and "
+              f"cover {c8.loc[0.8, 'share_of_import_it_can_cover']:.0%} of the import; 2.4 kW: "
+              f"{c8.loc[2.4, 'share_of_surplus_it_can_store']:.0%} / {c8.loc[2.4, 'share_of_import_it_can_cover']:.0%}.",
+              "- 15-minute averages hide short peaks (kettle, induction hob). `peak_per_phase` uses the meter's own "
+              "per-phase maximum (W) per interval, when the P1 file has those columns.",
+              f"- Connection {self.conn.label}: {self.conn.phase_kw:.2f} kW per phase; batteries are capped at "
+              f"{self.conn.battery_phase_cap_w / 1000:.2f} kW per phase."]
+        sec.md = "\n".join(md)
+        f = self.fig(charts.power_duration, imp_s, exp_s, [0.8, 2.4])
+        if f:
+            sec.figures["power_duration"] = f
         self.emit(sec)
 
     # ------------------------------------------------------------------ step 6
@@ -784,6 +870,18 @@ class Analysis:
         ys = self.savings_year_chart(rec)
         if ys:
             sec.figures["savings_per_price_year"] = ys
+        self.chosen = self.pick_battery(summary)
+        if self.chosen is not None:
+            split = self.earnings_by_strategy(self.chosen, contracts, meta)
+            if split is not None:
+                tbl, fig = split
+                sec.tables[f"earnings_per_year_{self.chosen.id}"] = tbl.round(0)
+                if fig:
+                    sec.figures["earnings_per_strategy"] = fig
+                md.append(f"**Earnings per strategy** for {self.chosen.name} (chosen battery): each year of "
+                          "ownership split into avoided import, energy sold, feed-in given up for stored solar, "
+                          "grid charging cost, and standby/other (saldering netting, feed-in tiers). Bars stack to "
+                          "the net saving (black dot); later years shrink as capacity fades.")
         sec.md = "\n".join(md)
         self.emit(sec)
         # Recompute Objective 1 with simulated cycles (best strategy per battery).
@@ -797,6 +895,123 @@ class Analysis:
                                & (rec.scenario == "nosal_min50")]["efc"].mean()
         if cyc:
             self.step_breakeven(cycles=cyc)
+
+    # ------------------------------------------------------------------ 11.4 / 11.6 helpers
+    def pick_battery(self, summary) -> Battery | None:
+        want = self.opts.chosen_battery or self.cfg.get("chosen_battery")
+        if want:
+            for b in self.batteries:
+                if b.id == want:
+                    return b
+            self.log(f"  chosen battery {want!r} not found; using the fastest payback")
+        rk = summary.get("ranked") if summary else None
+        if rk is not None and len(rk):
+            r = rk[(rk.analysis == "headline") & (rk.price_variant == "NL current")]
+            if len(r):
+                bid = r.sort_values("payback_years").iloc[0]["_bid"]
+                return next(b for b in self.batteries if b.id == bid)
+        return self.batteries[0] if self.batteries else None
+
+    def life_years(self, b: Battery, efc: float) -> float:
+        lim = [b.warranty_years or 10.0]
+        if efc and efc > 0 and b.cycle_life:
+            lim.append(b.cycle_life / efc)
+        return min(min(lim), float(self.cfg["analysis"].get("horizon_years", 20)))
+
+    def earnings_by_strategy(self, b: Battery, contracts, meta):
+        c = self.cheapest_dynamic() or (contracts[0] if contracts else None)
+        if c is None:
+            return None
+        if c not in contracts and c.id not in [x.id for x in contracts]:
+            contracts = contracts + [c]
+        cap = self.conn.battery_cap_w(b.phases)
+        m = meta.get((b.id, c.id), {"windows": [], "wear": self.wear_for(b)[0]})
+        per_scn = {}
+        efc_by = {}
+        for strat in self.strategies_for(c):
+            if strat == "timed" and not m["windows"]:
+                continue
+            for scn in self.scenarios:
+                parts, efcs = [], []
+                for label, per, idx, _ in self.periods(c, scn, self.head_years if c.is_dynamic else None):
+                    r = self.sim_strategy(strat, b, cap, per, idx, c, scn, m["wear"], windows=m["windows"])
+                    sv = self.saving(r, per, c, scn)
+                    u, s_ = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
+                    sb = (b.standby_w or 0.0) / 1000.0 * 0.25
+                    parts.append(extras.earnings_split(per.imp - per.exp, r.batt_ac, sb, u, s_, sv))
+                    efcs.append(r.efc)
+                if parts:
+                    per_scn[(strat, scn)] = pd.DataFrame(parts).mean().to_dict()
+                    efc_by[(strat, scn)] = float(np.mean(efcs))
+        if not per_scn:
+            return None
+        start = pd.Timestamp(self.cfg["analysis"]["purchase_date"])
+        rows = []
+        for strat in sorted({k[0] for k in per_scn}):
+            efc = efc_by.get((strat, "nosal_min50"), 250.0)
+            life = self.life_years(b, efc)
+            t, year = 0.0, start.year
+            first = (pd.Timestamp(year=year + 1, month=1, day=1) - start).days / 365.0
+            while t < life - 1e-9:
+                frac = min(first if t == 0 else 1.0, life - t)
+                scn = regime_for_year(self.cfg, year)
+                comp = per_scn.get((strat, scn)) or per_scn.get((strat, "nosal_min50"))
+                capf = 1.0 - (1.0 - b.eol_capacity) * min(efc * (t + frac / 2) / (b.cycle_life or 1e12), 1.0)
+                row = {"strategy": strat, "year": year, "rules": self.regimes[scn]["label"]}
+                for k, v in comp.items():
+                    row[k] = v * frac * capf
+                row["net_saving"] = sum(comp.values()) * frac * capf
+                rows.append(row)
+                t += frac
+                year += 1
+        tbl = pd.DataFrame(rows)
+        fig = self.fig(charts.earnings_stacked, tbl, f"{b.name} – {c.label}")
+        return tbl, fig
+
+    # ------------------------------------------------------------------ 11.6 Objective 4
+    def step_kiln(self):
+        sec = Section("kiln", "9. Objective 4 – pottery kiln on free power")
+        k = dict(self.cfg.get("kiln", {}) or {})
+        k.update(self.opts.kiln or {})
+        b = getattr(self, "chosen", None)
+        powers = [float(p) for p in k.get("powers_kw", [1.5, 2.0, 3.0, 3.6])]
+        one_phase = self.conn.phases == 1
+        if one_phase:
+            powers = [p for p in powers if p <= float(k.get("single_phase_max_kw", 3.68))]
+        hours, duty = float(k.get("firing_hours", 8)), float(k.get("avg_duty", 0.7))
+        starts, tol = [int(h) for h in k.get("start_hours", [7, 8, 9, 10])], float(k.get("free_tolerance", 0.05))
+        nb = extras.kiln_days(self.profile, None, 0, None, powers, hours, duty, starts, tol)
+        wb, soc_start, label = None, None, "with_battery"
+        if b is not None:
+            cap = self.conn.battery_cap_w(b.phases)
+            net = (self.profile["imp"] - self.profile["exp"]).values
+            r = simulate(net, SELF, b, cap, keep_trace=True)
+            soc_start = np.concatenate([[0.0], r.soc[:-1]])
+            wb = extras.kiln_days(self.profile, b, cap, soc_start, powers, hours, duty, starts, tol)
+        price = self.avg_prices()[0]["nosal_min50"][0]
+        summ = extras.kiln_summary(nb, wb, price, label)
+        sec.tables["kiln_free_firing_days"] = summ.round(2)
+        if wb is not None and len(wb):
+            by_month = wb[wb.free].groupby(["kiln_kw", "month"]).size().unstack(fill_value=0)
+            sec.tables["free_days_per_month_with_battery"] = by_month
+        md = [f"How many days per year a kiln can fire to maximum temperature on solar surplus"
+              f"{' plus the ' + b.name if b else ''}, with at most {tol:.0%} of the firing energy from the grid. "
+              f"Assumptions (config.yaml `kiln`, edit to your kiln's data sheet): a firing takes {hours:g} h and the "
+              f"kiln draws on average {duty:.0%} of its rated power, so a firing needs rated kW × {hours * duty:g} kWh. "
+              f"Start hour is chosen per day among {starts}. The battery starts each day at the charge it would have "
+              "had with normal self-consumption.",
+              f"- `avg_cost_per_firing` = grid energy × €{price:.3f}/kWh (average all-in import price, 2027 rules). "
+              "Surplus solar is not entirely free: from 2027 each kWh used instead of exported gives up about "
+              f"€{self.avg_prices()[0]['nosal_min50'][1]:.3f} of feed-in compensation.",
+              "- Kilns above 3.68 kW (16 A) need a three-phase (or dedicated 1-phase high-current) group; "
+              + ("those are left out on this single-phase connection." if one_phase else
+                 f"your {self.conn.label} connection allows them."),
+              "- One firing per day at most; the profile year uses the real meter data (synthetic October included)."]
+        sec.md = "\n".join(md)
+        f = self.fig(charts.kiln_days, summ, b.name if b else None, label)
+        if f:
+            sec.figures["kiln_free_days"] = f
+        self.emit(sec)
 
     def bname(self, bid):
         return next((b.name for b in self.batteries if b.id == bid), bid)
@@ -828,7 +1043,7 @@ class Analysis:
                                  **{f"saving_{self.regimes[s]['label']}": v for s, v in by_scn.items()},
                                  "efc_per_year": efc, "standby_eur_year_approx": (b.standby_w or 0) * 8.76 *
                                  self.avg_u_cache(), "estimated": "yes" if b.estimated else ""})
-                variants = b.price_variants(d.get("de_travel_cost_eur", 0.0))
+                variants = b.price_variants(d.get("de_travel_cost_eur", 0.0), self.cfg.get("blackfriday"))
                 if self.opts.price_variant != "all":
                     variants = {k: v for k, v in variants.items() if k == self.opts.price_variant}
                 for vname, price in variants.items():
