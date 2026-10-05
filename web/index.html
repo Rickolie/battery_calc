@@ -159,6 +159,10 @@ details.tblw{margin:6px 0}details.tblw>summary{cursor:pointer;font-size:.9rem}
         The report then shows a "Black Friday quick decision" table with the deal, its discount and the payback.
         Until real deals are found, the estimate below is used.</p>
       <div class="grid">
+        <div><label><input type="checkbox" id="bfest" checked> Use the discount estimates</label>
+          <p class="help">On: adds "Black Friday (est.)" rows with the discounts below, so you can see the effect of
+            a deal before one is found. Off: only real deal prices the scraper found are shown; the discount
+            fields are then ignored.</p></div>
         <div><label for="bfnl">Estimated discount NL</label>
           <input id="bfnl" inputmode="decimal" value="15"> %
           <p class="help">Discount assumed on today's Dutch price for the "NL Black Friday (est.)" rows.</p></div>

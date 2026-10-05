@@ -135,7 +135,7 @@ $("run").onclick = () => {
     connection: $("connection").value, margin: parseFloat($("margin").value), price_variant: $("variant").value,
     feed_in_2030: parseFloat($("fi2030").value), quick: $("quick").value === "1",
     battery_set: $("bset").value, chosen_battery: $("chosen").value,
-    blackfriday: { discount_nl: pct("bfnl"), discount_de: pct("bfde") },
+    blackfriday: { discount_nl: pct("bfnl"), discount_de: pct("bfde"), estimates: $("bfest").checked },
     kiln: { firing_hours: num("kh"), avg_duty: pct("kd") },
   };
   worker.postMessage({ cmd: "run", settings });

@@ -959,14 +959,16 @@ class Analysis:
             bfc = self.cfg.get("blackfriday", {}) or {}
             w = bfc.get("window", ["11-20", "12-01"])
             found = bft["nl_deal_eur"].notna().any() or bft["de_deal_eur"].notna().any()
+            est = bool(bfc.get("estimates", True))
             md.append(f"**Black Friday quick decision** (window {w[0]} – {w[1]}, Black Friday {bfc.get('date', '')}): "
                       "per battery its best contract and strategy, today's price, the real deal price the scraper "
                       "found during the window (NL incl. VAT, DE 0% VAT from German manufacturer shops) with the "
-                      "discount against the last normal price, and the estimate "
-                      f"(−{float(bfc.get('discount_nl', 0.15)):.0%} NL / −{float(bfc.get('discount_de', 0.15)):.0%} DE). "
-                      "Sorted by the best available payback. "
+                      "discount against the last normal price"
+                      + (f", and the estimate (−{float(bfc.get('discount_nl', 0.15)):.0%} NL / "
+                         f"−{float(bfc.get('discount_de', 0.15)):.0%} DE)" if est else " (estimates switched off)")
+                      + ". Sorted by the best available payback. "
                       + ("" if found else "No real deals recorded yet: the scraper fills them in during the window "
-                         "(every 4 hours), until then the estimate columns apply."))
+                         "(every 4 hours)" + (", until then the estimate columns apply." if est else ".")))
         self.chosen = self.pick_battery(summary)
         if self.chosen is not None:
             split = self.earnings_by_strategy(self.chosen, contracts, meta)
@@ -1028,6 +1030,8 @@ class Analysis:
                 v for v in (row["payback_nl_est"], row["payback_now"]) if v is not None)
             rows.append(row)
         df = pd.DataFrame(rows).sort_values("best_payback").reset_index(drop=True)
+        if not (self.cfg.get("blackfriday", {}) or {}).get("estimates", True):
+            df = df.drop(columns=["nl_est_eur", "payback_nl_est", "payback_de_est"])
         for c in ("nl_deal_discount", "de_deal_discount"):
             df[c] = df[c].map(lambda v: f"{v:.0%}" if isinstance(v, float) and not np.isnan(v) else "")
         return df.round(2)

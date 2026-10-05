@@ -393,6 +393,8 @@ def test_black_friday_variants():
     assert v["DE Black Friday (est.)"] == pytest.approx(1000 * 0.8 + 50)
     b.price_bf_nl = 999.0
     assert b.price_variants(0.0, {})["NL Black Friday"] == pytest.approx(999.0)
+    off = b.price_variants(0.0, {"estimates": False})
+    assert "NL Black Friday" in off and not any("(est.)" in k for k in off)
 
 
 def test_kiln_days_battery_helps_and_bigger_kiln_fewer_days(profile):

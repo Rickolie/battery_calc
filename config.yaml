@@ -211,6 +211,7 @@ blackfriday:
   window: ['11-20', '12-01']   # MM-DD; the scraper records real deal prices in this window
   discount_nl: 0.15
   discount_de: 0.15
+  estimates: true              # false = only real deals, no "(est.)" rows
   vat: 0.21
 
 # Battery choice for Objective 4 and the earnings split (Specs.txt 11.4, 11.6).

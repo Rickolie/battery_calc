@@ -71,7 +71,8 @@ class Battery:
 
     def price_variants(self, de_travel: float = 0.0, bf: dict | None = None) -> dict:
         """Purchase price per scenario. Black Friday prices use the real deal when
-        known, otherwise a configured discount on the current price ("est.")."""
+        known, plus a configured discount on the current price ("est.") unless
+        `bf["estimates"]` is false."""
         out = {}
         if self.price_nl is not None:
             out["NL current"] = self.price_nl + self.extra_hardware
@@ -86,7 +87,9 @@ class Battery:
                 out["NL Black Friday"] = self.price_bf_nl + self.extra_hardware
             if self.price_bf_de is not None:
                 out["DE Black Friday"] = self.price_bf_de + self.extra_hardware + de_travel
-            # ... and always the estimate (configured discount on today's price).
+            # ... and, unless switched off, the estimate (configured discount on today's price).
+            if not bf.get("estimates", True):
+                return out
             if self.price_nl is not None:
                 out["NL Black Friday (est.)"] = self.price_nl * (1 - float(bf.get("discount_nl", 0.15))) + self.extra_hardware
             base = self.price_de if self.price_de is not None else (
