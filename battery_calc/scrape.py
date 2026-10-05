@@ -247,20 +247,28 @@ def scrape_battery_prices(cfg: dict, force_blackfriday: bool = False, today: dt.
     def collect(field: str, rid: str) -> list:
         found = []
         for entry in [e for e in re.split(r"\s+(?=(?:shopify:)?https?://)", field.strip()) if e]:
-            url, _, match = entry.partition("|")
-            try:
-                if url.startswith("shopify:"):
-                    url = url[8:]
-                    r = shopify_price(url, match, get)
-                    p = r[0] if r else None
-                else:
-                    p = shop_price(get(url), url, match if match.startswith("ajax:") else match.replace("_", " "))
-                if p:
-                    found.append((p, url))
-                else:
+            # `a++b` = a set bought as separate products (e.g. base unit + expansion module): prices add up.
+            total, first_url = 0.0, None
+            for part in entry.split("++"):
+                url, _, match = part.strip().partition("|")
+                try:
+                    if url.startswith("shopify:"):
+                        url = url[8:]
+                        r = shopify_price(url, match, get)
+                        p = r[0] if r else None
+                    else:
+                        p = shop_price(get(url), url, match if match.startswith("ajax:") else match.replace("_", " "))
+                except Exception as e:
+                    errors.append(f"{rid} {url}: {e}")
+                    p = None
+                if not p:
                     errors.append(f"{rid}: no price matching '{match}' on {url}")
-            except Exception as e:
-                errors.append(f"{rid} {url}: {e}")
+                    total = None
+                    break
+                total += p
+                first_url = first_url or url
+            if total:
+                found.append((total, first_url))
         return found
 
     for i, r in df.iterrows():

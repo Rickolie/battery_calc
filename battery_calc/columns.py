@@ -13,7 +13,9 @@ GLOSSARY = {
     "contract": "Electricity contract: supplier – product. 'Current contract – vast.txt' is your own fixed contract.",
     "strategy": "How the battery is controlled: self_consumption = store solar surplus, use it when the house "
                 "imports; timed = fixed daily charge/discharge windows; dynamic = day-ahead prices with peak "
-                "reservation (needs custom control); dynamic_sell = same, may also sell to the grid; hbc_default / "
+                "reservation (needs custom control); dynamic_sell = same, may also sell to the grid; forecast = daily "
+                "optimisation over the known day-ahead prices and a usage/solar forecast (like EMHASS in Home "
+                "Assistant, needs custom control); hbc_default / "
                 "hbc_pv_first = Home Battery Control's Dynamic strategy as-is; perfect_foresight = theoretical "
                 "upper bound with all prices and usage known in advance (not achievable).",
     "scenario": "Which rules are applied: 2026 (saldering), 2027–2029 (no saldering, at least 50% feed-in "
@@ -167,6 +169,36 @@ GLOSSARY = {
     "payback_de_est": "Payback at the estimated German Black Friday price plus travel cost (years).",
     "deal_found": "Date and shop where the deal price was found.",
     "best_payback": "Best payback of the real deals, or of the estimate/today's price if no deal is known yet.",
+    # ------------------------------------------------------------ feed-in value
+    "avg_spot_eur_kwh": "Average day-ahead (EPEX) price over all hours of that year (€/kWh, excl. taxes).",
+    "avg_spot_when_exporting": "Average day-ahead price weighted by how much you export in each quarter-hour – "
+                               "what your solar surplus is actually worth on the market (€/kWh).",
+    "export_at_negative_price_pct": "Share of your yearly export that happens while the day-ahead price is "
+                                    "negative; on a dynamic contract that export costs money.",
+    "feed_in_income_eur": "Yearly feed-in income on the cheapest dynamic contract under the 2027–2029 rules (€).",
+    "feed_in_income_per_kwh": "Feed-in income per exported kWh (€/kWh); slightly above the market value because "
+                              "the 50% legal minimum lifts negative-price hours.",
+    # ------------------------------------------------------------ advice
+    "saving_eur_year_2027": "Average yearly saving with this battery from 2027 (2027–2029 rules, last 3 price years), €.",
+    "days_full": "Days per year on which the battery gets completely full (self-consumption on your profile year).",
+    "days_below_half": "Days per year on which the battery never gets more than half full (mostly winter) – "
+                       "capacity that sits idle.",
+    "share_of_surplus_stored": "Share of your yearly solar surplus that ends up in the battery instead of the grid.",
+    "option": "Contract, with or without the recommended battery.",
+    "yearly_cost_eur_2027": "Total yearly electricity cost from 2027 (2027–2029 rules, last 3 price years), incl. "
+                            "taxes and fixed costs, minus the battery saving (purchase price not included).",
+    "battery_saving_eur": "Yearly saving of the battery in this combination (€).",
+    "date": "Day.",
+    "solar_surplus_kwh": "Solar surplus that day without a battery: what would otherwise go to the grid (kWh).",
+    "charged_from_solar_kwh": "Energy stored in the battery from solar surplus that day (kWh).",
+    "charged_from_grid_kwh": "Energy charged from the grid that day (kWh), e.g. at very low dynamic prices.",
+    "discharged_kwh": "Energy the battery delivered that day (kWh).",
+    "import_before_kwh": "Grid import that day without a battery (kWh).",
+    "import_after_kwh": "Grid import that day with the battery (kWh).",
+    "max_soc_kwh": "Highest state of charge that day (kWh).",
+    "min_soc_kwh": "Lowest state of charge that day (kWh).",
+    "full": "True if the battery got completely full that day.",
+    "saving_eur": "Saving that day compared with no battery (€).",
     # ------------------------------------------------------------ kiln
     "kiln_kw": "Rated power of the kiln (kW).",
     "firing_kwh": "Energy for one firing to maximum temperature: kW × hours × average power share.",
@@ -186,6 +218,7 @@ PATTERNS = [
     (r"at_charge_(\d+\.\d+)", "Minimum price difference worth charging when charging at €{0}/kWh: the discharge "
                               "price must be at least this much higher (all-in, €/kWh)."),
     (r"saving_(.+)", "Average yearly saving with the battery under the {0} (€)."),
+    (r"eur_(\d{4})", "Saving in price year {0} under 2027–2029 rules (€, wear not deducted)."),
     (r"^(\d{1,2})$", "Free firing days in month {0} (1 = January)."),
 ]
 
@@ -197,6 +230,12 @@ TABLE_OVERRIDES = [
     (r"import_export_power", {"max_kw": "Highest 15-minute average power measured (kW)."}),
     (r"peak_per_phase", {"max_kw": "Highest power peak on this phase (kW).",
                          "p99_kw": "Peak exceeded in only 1% of the quarter-hours on this phase (kW)."}),
+    (r"gap_to_perfect_foresight", {
+        "strategy": "Strategy, or a perfect-foresight variant with fewer freedoms ('bound: ...').",
+        "knows": "What the strategy knows when it decides.",
+        "mean_eur": "Average yearly saving over the price years shown (€).",
+        "cycles_per_year": "Full battery cycles per year.",
+        "gap_to_bound_eur": "How much less than perfect foresight it saves per year (€)."}),
     (r"monthly_flows", {"index": "Month (YYYY-MM) of the profile year."}),
 ]
 

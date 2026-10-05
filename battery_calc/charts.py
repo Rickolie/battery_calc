@@ -190,3 +190,54 @@ def kiln_days(summ, battery_name, label) -> bytes:
     ax.patch.set_visible(False)
     ax.legend(fontsize=8, loc="upper right")
     return _png(fig)
+
+
+def soc_year(daily, usable, title) -> bytes:
+    """Whole year, one bar group per day: energy in/out and the SoC range, with a legend."""
+    fig, ax = plt.subplots(figsize=(10, 4.2))
+    x = daily.index
+    ax.bar(x, daily["charged_from_solar_kwh"], width=1.0, color=PALETTE[3], label="Charged from solar (kWh/day)")
+    ax.bar(x, daily["charged_from_grid_kwh"], width=1.0, bottom=daily["charged_from_solar_kwh"], color=PALETTE[4],
+           label="Charged from grid (kWh/day)")
+    ax.bar(x, -daily["discharged_kwh"], width=1.0, color=PALETTE[1], label="Discharged (kWh/day, negative)")
+    ax.plot(x, daily["max_soc_kwh"], color=PALETTE[0], lw=1.2, label="Highest state of charge that day (kWh)")
+    ax.plot(x, daily["min_soc_kwh"], color=PALETTE[2], lw=0.8, label="Lowest state of charge that day (kWh)")
+    ax.axhline(usable, color=PALETTE[0], ls="--", lw=1, label=f"Usable capacity ({usable:.1f} kWh)")
+    ax.axhline(0, color="black", lw=0.6)
+    ax.set_ylabel("kWh")
+    ax.set_title(title)
+    ax.legend(fontsize=7, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.12), frameon=False)
+    fig.autofmt_xdate()
+    return _png(fig)
+
+
+def daily_charge(daily, usable, title) -> bytes:
+    fig, ax = plt.subplots(figsize=(10, 4.2))
+    x = daily.index
+    ax.bar(x, daily["solar_surplus_kwh"], width=1.0, color="#f2cc8f", label="Solar surplus that day (kWh)")
+    ax.bar(x, daily["charged_from_solar_kwh"], width=1.0, color=PALETTE[3], label="Stored in the battery (kWh)")
+    ax.plot(x, daily["import_before_kwh"], color=PALETTE[2], lw=0.8, label="Grid import without battery (kWh)")
+    ax.plot(x, daily["import_after_kwh"], color=PALETTE[1], lw=0.8, label="Grid import with battery (kWh)")
+    ax.axhline(usable, color=PALETTE[0], ls="--", lw=1, label=f"Usable capacity ({usable:.1f} kWh)")
+    ax.set_ylabel("kWh per day")
+    ax.set_title(title)
+    ax.legend(fontsize=7, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.12), frameon=False)
+    fig.autofmt_xdate()
+    return _png(fig)
+
+
+def daily_savings(saving, title) -> bytes:
+    fig, ax = plt.subplots(figsize=(10, 4))
+    x = saving.index
+    ax.bar(x, saving.values, width=1.0, color=np.where(saving.values >= 0, PALETTE[3], PALETTE[1]),
+           label="Saving that day (€)")
+    ax.set_ylabel("€ per day")
+    ax2 = ax.twinx()
+    ax2.plot(x, saving.cumsum().values, color=PALETTE[0], lw=1.5, label="Cumulative saving (€)")
+    ax2.set_ylabel("€ cumulative")
+    ax.set_title(title)
+    h1, l1 = ax.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax.legend(h1 + h2, l1 + l2, fontsize=8, loc="upper left")
+    fig.autofmt_xdate()
+    return _png(fig)

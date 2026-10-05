@@ -158,3 +158,36 @@ def kiln_summary(days_nb: pd.DataFrame, days_b: pd.DataFrame, price: float, labe
                         "months_with_free_days": ",".join(str(m) for m in sorted(gb[gb.free].month.unique()))})
         out.append(row)
     return pd.DataFrame(out)
+
+
+# ---------------------------------------------------------------- interactive chart specs
+
+def ts(index) -> list:
+    """Unix seconds for chart x values."""
+    # pandas 3 may store timestamps in s/ms/us/ns; convert explicitly to seconds.
+    return [int(t) for t in pd.DatetimeIndex(index).as_unit("s").asi8]
+
+
+def series(label, values, color, kind="line", scale="y", **kw) -> dict:
+    vals = [None if (v is None or (isinstance(v, float) and math.isnan(v))) else round(float(v), 3) for v in values]
+    return {"label": label, "values": vals, "color": color, "type": kind, "scale": scale, **kw}
+
+
+def daily_battery(index, net, batt_ac, soc, usable, standby_kwh):
+    """Per day: solar surplus available, charged from solar/grid, discharged, import left, max/min SoC."""
+    L = net + standby_kwh
+    ch = np.maximum(batt_ac, 0)
+    dis = np.maximum(-batt_ac, 0)
+    ch_solar = np.minimum(ch, np.maximum(-L, 0))
+    g = L + batt_ac
+    df = pd.DataFrame({"surplus": np.maximum(-net, 0), "ch_solar": ch_solar, "ch_grid": ch - ch_solar,
+                       "discharged": dis, "import_left": np.maximum(g, 0), "import_before": np.maximum(net, 0),
+                       "soc": soc}, index=index)
+    day = df.groupby(df.index.date)
+    out = pd.DataFrame({"solar_surplus_kwh": day.surplus.sum(), "charged_from_solar_kwh": day.ch_solar.sum(),
+                        "charged_from_grid_kwh": day.ch_grid.sum(), "discharged_kwh": day.discharged.sum(),
+                        "import_before_kwh": day.import_before.sum(), "import_after_kwh": day.import_left.sum(),
+                        "max_soc_kwh": day.soc.max(), "min_soc_kwh": day.soc.min()})
+    out["full"] = out.max_soc_kwh >= 0.98 * usable
+    out.index = pd.to_datetime(out.index)
+    return out

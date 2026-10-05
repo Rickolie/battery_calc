@@ -143,7 +143,7 @@ battery_defaults:
   de_travel_cost_eur: 50.0
 
 strategies:
-  enabled: [self_consumption, timed, dynamic, dynamic_sell, hbc_default, hbc_pv_first, perfect_foresight]
+  enabled: [self_consumption, timed, dynamic, dynamic_sell, forecast, hbc_default, hbc_pv_first, perfect_foresight]
   # Home Battery Control (github.com/gitcodebob/marstek-venus-rs485-node-red)
   # Dynamic strategy reproduced exactly ("Extreme-Pair Matching", flow
   # 02 strategy-dynamic-2.json). These run as-is in Home Assistant; the
@@ -182,6 +182,19 @@ strategies:
     window_hours: 3
     charge_starts: [1, 3, 12, 13]
     discharge_starts: [7, 17, 18, 19]
+  # Forecast optimiser (model-predictive control, like EMHASS in Home
+  # Assistant): every day at replan_hour, plan with the day-ahead prices known
+  # then (until tomorrow night) and a usage/solar forecast = mean of the last
+  # forecast_days days. wear_scale x wear per kWh is charged in the plan
+  # (0.5 tuned on 2023-2025: lower cycles a lot more for ~EUR 1/yr, 0.75+
+  # earns less). Planned on hourly steps (plan_minutes; 15 is 2x slower and
+  # no better). LP-based like perfect_foresight, so headline years only.
+  forecast:
+    replan_hour: 13
+    plan_minutes: 60
+    forecast_days: 3
+    wear_scale: 0.5
+    tolerance_kwh: 0.02
   perfect_foresight:
     soc_levels: 21
 
