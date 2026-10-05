@@ -303,6 +303,12 @@ def test_full_run_both_regimes_and_analyses(tmp_path):
     assert set(rk["analysis"]) == {"headline", "full"}
     assert (rk["payback_years"] > 0).all()
     assert os.path.exists(tmp_path / "res" / "breakeven.csv")
+    # every column shown in a report table has a plain-language description
+    from battery_calc.columns import describe
+    from battery_calc.report import shown_columns
+    missing = [(name, c) for s in secs.values() for name, df in s.tables.items()
+               for c in shown_columns(df) if describe(c, name) is None]
+    assert not missing, missing
 
 
 def test_hbc_extreme_pair_matching():

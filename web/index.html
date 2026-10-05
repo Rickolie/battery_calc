@@ -23,6 +23,10 @@ input,select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-ra
 fieldset{border:1px solid var(--line);border-radius:8px;margin:12px 0;padding:8px 12px 12px}
 legend{font-weight:700;padding:0 6px}
 .help{color:var(--muted);font-size:.85rem;margin:4px 0 0;line-height:1.4}
+.cols{font-size:.8rem;margin:4px 0 16px}.cols summary{cursor:pointer;color:var(--muted)}
+.cols dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;margin:6px 0}
+.cols dt{font-family:ui-monospace,monospace;font-weight:600;overflow-wrap:anywhere}.cols dd{margin:0;color:var(--fg)}
+@media (max-width:600px){.cols dl{grid-template-columns:1fr}.cols dd{margin-bottom:6px}}
 .hidden{display:none}.ok{color:var(--ok)}.warn{color:var(--warn)}.err{color:var(--err)}
 .tbl{overflow-x:auto}table{border-collapse:collapse;font-size:12px}td,th{border:1px solid var(--line);padding:3px 6px;text-align:right;white-space:nowrap}
 th{background:var(--card)}td:first-child,th:first-child{text-align:left}

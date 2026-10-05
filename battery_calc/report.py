@@ -9,6 +9,8 @@ import re
 import numpy as np
 import pandas as pd
 
+from .columns import describe_table
+
 
 YEAR_COLS = {"year", "jaar", "price_year", "maand"}
 
@@ -62,6 +64,7 @@ def md_inline_to_html(text: str) -> str:
     for line in text.splitlines():
         esc = html.escape(line)
         esc = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", esc)
+        esc = re.sub(r"(?<![\w*])\*([^*\s][^*]*?)\*(?![\w*])", r"<em>\1</em>", esc)
         esc = re.sub(r"`(.+?)`", r"<code>\1</code>", esc)
         m = re.match(r"^(\s*)- (.*)", esc)
         if m:
@@ -84,10 +87,32 @@ def slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")[:80]
 
 
+def shown_columns(df: pd.DataFrame) -> list[str]:
+    d = df.head(1)
+    if not isinstance(d.index, pd.RangeIndex):
+        d = d.reset_index()
+    return [str(c) for c in d.columns if not str(c).startswith("_")]
+
+
+def columns_md(df: pd.DataFrame, name: str) -> str:
+    items = describe_table(shown_columns(df), name)
+    if not items:
+        return ""
+    return "\n".join(["**Columns**", ""] + [f"- `{c}`: {d}" for c, d in items])
+
+
+def columns_html(df: pd.DataFrame, name: str) -> str:
+    items = describe_table(shown_columns(df), name)
+    if not items:
+        return ""
+    rows = "".join(f"<dt>{html.escape(c)}</dt><dd>{html.escape(d)}</dd>" for c, d in items)
+    return f"<details class='cols' open><summary>Column descriptions</summary><dl>{rows}</dl></details>"
+
+
 def section_md(sec, fig_dir_rel: str | None = None) -> str:
     parts = [f"## {sec.title}", "", sec.md, ""]
     for name, df in sec.tables.items():
-        parts += [f"### {name}", "", table_md(df), ""]
+        parts += [f"### {name}", "", table_md(df), "", columns_md(df, name), ""]
     for name in sec.figures:
         if fig_dir_rel is not None:
             parts += [f"![{name}]({fig_dir_rel}/{sec.id}_{name}.png)", ""]
@@ -97,7 +122,7 @@ def section_md(sec, fig_dir_rel: str | None = None) -> str:
 def section_html(sec) -> str:
     parts = [f"<section id='{sec.id}'><h2>{html.escape(sec.title)}</h2>", md_inline_to_html(sec.md)]
     for name, df in sec.tables.items():
-        parts += [f"<h3>{html.escape(name)}</h3>", table_html(df)]
+        parts += [f"<h3>{html.escape(name)}</h3>", table_html(df), columns_html(df, name)]
     for name, png in sec.figures.items():
         b64 = base64.b64encode(png).decode()
         parts.append(f"<figure><img alt='{html.escape(name)}' src='data:image/png;base64,{b64}'/></figure>")
@@ -108,7 +133,10 @@ def section_html(sec) -> str:
 CSS = """body{font-family:system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:16px;color:#1d1d1f;background:#fff}
 table{border-collapse:collapse;font-size:12px}td,th{border:1px solid #ddd;padding:3px 6px;text-align:right}
 th{background:#f3f4f6}td:first-child,th:first-child{text-align:left}.tbl{overflow-x:auto}
-img{max-width:100%}code{background:#f3f4f6;padding:0 3px}
+img{max-width:100%}
+.cols{font-size:12px;margin:4px 0 14px}.cols summary{cursor:pointer;color:#555}
+.cols dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;margin:6px 0}
+.cols dt{font-family:monospace;font-weight:600}.cols dd{margin:0}code{background:#f3f4f6;padding:0 3px}
 @media (prefers-color-scheme: dark){body{background:#111;color:#eee}th{background:#222}td,th{border-color:#333}code{background:#222}}"""
 
 
