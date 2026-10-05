@@ -16,6 +16,7 @@ from . import charts, extras
 from .battery import (GRID_CHARGE, SELF, ZERO_IMPORT, Battery, in_scope, load_batteries, perfect_foresight,
                       plan_dynamic, plan_forecast, plan_hbc, plan_timed, simulate)
 from .breakeven import breakeven_rows, wear_cost
+from .report import slug
 from .config import Connection, resolve
 from .contracts import Contract, load_contracts_csv, parse_vast, read_text
 from .costs import Period, compute_cost, marginal_values
@@ -108,8 +109,8 @@ class Analysis:
         self.step_contracts()
         self.step_batteries()
         self.step_breakeven()
+        self.step_payback()          # also emits section 8 (break-even with simulated cycles)
         self.step_sanity()
-        self.step_payback()
         self.step_kiln()
         self.step_advice()
         return self.sections
@@ -156,8 +157,18 @@ class Analysis:
         if self.opts.quick:
             self.full_years = list(self.head_years)
 
-        md = [f"**Data:** {self.inp.label}. **{self.conn.describe()}.**", ""]
-        md.append(f"P1 file `{rep.source}`: {rep.rows} rows, {rep.first:%Y-%m-%d %H:%M} to {rep.last:%Y-%m-%d %H:%M} "
+        real_i = profile.loc[self.real_mask, "imp"].sum()
+        real_x = profile.loc[self.real_mask, "exp"].sum()
+        md = [f"**{self.inp.label}** · {self.conn.describe()}",
+              f"- Profile year {rep.window[0]:%Y-%m-%d} to {rep.window[1]:%Y-%m-%d}: import **{tot_i:,.0f} kWh**, "
+              f"export **{tot_x:,.0f} kWh** (real months only: {real_i:,.0f} / {real_x:,.0f})."]
+        if rep.missing_months:
+            md.append(f"- **Filled synthetically:** {', '.join(rep.missing_months)} (blend of the two weeks before "
+                      "and after).")
+        if rep.low_confidence:
+            md.append("- **Low confidence:** more than 3 months are synthetic.")
+        md.append("#### Meter file details")
+        md.append(f"- P1 file `{rep.source}`: {rep.rows} rows, {rep.first:%Y-%m-%d %H:%M} to {rep.last:%Y-%m-%d %H:%M} "
                   f"(Europe/Amsterdam, DST handled).")
         md.append(f"- Duplicates removed: {rep.duplicates}; counter resets: {len(rep.resets)}; "
                   f"gaps ≤1 h interpolated: {len(rep.interpolated_gaps)}; longer gaps flagged and filled: "
@@ -167,18 +178,8 @@ class Analysis:
         if rep.tariff_rule_agreement is not None:
             md.append(f"- T1/T2 from counters matches the configured tariff-hour rule in "
                       f"{rep.tariff_rule_agreement:.1%} of intervals (rule used only for synthetic intervals).")
-        md.append(f"- Profile year: {rep.window[0]:%Y-%m-%d} to {rep.window[1]:%Y-%m-%d}.")
-        if rep.missing_months:
-            md.append(f"- **Missing months filled synthetically:** {', '.join(rep.missing_months)} "
-                      "(blend of the two weeks before and after, flagged).")
         for s in rep.partially_real_months:
             md.append(f"  - {s}")
-        if rep.low_confidence:
-            md.append("- **Low confidence:** more than 3 months are synthetic.")
-        real_i = profile.loc[self.real_mask, "imp"].sum()
-        real_x = profile.loc[self.real_mask, "exp"].sum()
-        md.append(f"- Yearly import {tot_i:,.0f} kWh, export {tot_x:,.0f} kWh "
-                  f"(real months only: import {real_i:,.0f}, export {real_x:,.0f}).")
         if self.pv is not None:
             gross = (profile["imp"] - profile["exp"] + self.pv.fillna(0)).sum()
             md.append(f"- PV data present: production {self.pv.sum():,.0f} kWh, gross consumption {gross:,.0f} kWh.")
@@ -187,8 +188,7 @@ class Analysis:
                       "gross consumption and the solar-forecast Charge goal are not available).")
         for n in rep.notes:
             md.append(f"- {n}")
-        md.append("")
-        md.append("**Price history**")
+        md.append("#### Price history")
         if self.prices is None:
             md += [f"- {n}" for n in self.prep.notes]
         else:
@@ -208,7 +208,7 @@ class Analysis:
             for n in self.prep.notes:
                 md.append(f"- {n}")
         md.append(f"- Cross-check: {self.prep.crosscheck}")
-        sec = Section("data", "1. Data quality", "\n".join(md))
+        sec = Section("data", "1. Your data", "\n".join(md))
         monthly = monthly_summary(profile)
         sec.tables["monthly_flows"] = monthly.round(3)
         f = self.fig(charts.monthly_flows, monthly)
@@ -301,14 +301,18 @@ class Analysis:
     def step_current_contract(self):
         self.load_contracts()
         md = []
-        sec = Section("current", "2. Current contract")
+        sec = Section("current", "3. Current contract")
         if self.current is None:
             md.append("No current contract given: it is left out of the comparison.")
             sec.md = "\n".join(md)
             self.emit(sec)
             return
         c = self.current
-        md.append(f"**{c.label}** ({c.type}, {c.start_date or '?'} → {c.end_date or '?'}). Source: `{c.source}`.")
+        md.append(f"**{c.label}** ({c.type}, {c.start_date or '?'} → {c.end_date or '?'}).")
+        md.append("`yearly cost = energy + energy tax + fixed costs + grid charges − tax reduction − feed-in income "
+                  "+ feed-in costs` (incl. VAT, on your profile year)")
+        md.append("#### Tariff details")
+        md.append(f"- Source: `{c.source}`.")
         md.append(f"- Kale prices excl. VAT: T1/dal €{c.kale_price(True):.5f}, T2/normaal €{c.kale_price(False):.5f}, "
                   f"single €{(c.price_single or 0):.5f}; feed-in €{(c.feed_in or 0):.5f}/kWh; fixed €{c.fixed_eur_year:.2f}/yr.")
         if c.feed_in_cost_tiers:
@@ -331,11 +335,9 @@ class Analysis:
                  "total_real_months_only": round(real.total, 2)}
             rows.append(d)
         sec.tables["current_contract_cost"] = pd.DataFrame(rows)
-        md.append("")
-        md.append("Yearly cost on the profile year (incl. VAT, grid charges and tax reduction). "
-                  "`total_real_months_only` is the check without the synthetic month(s).")
-        md.append("")
-        md.append("**Acceptance check:** compare `total` under 2026 rules with an actual annual bill "
+        md.append("#### Checks")
+        md.append("- `total_real_months_only` is the cost without the synthetic month(s).")
+        md.append("- **Acceptance check:** compare `total` under 2026 rules with an actual annual bill "
                   "(target: within 3%). No bill is in the repo, so this check is still open.")
         for w in self.taxes.warnings:
             md.append(f"- {w}")
@@ -376,7 +378,7 @@ class Analysis:
         return total / years if years else np.nan
 
     def step_contracts(self):
-        sec = Section("contracts", "3. Objective 2 – best contract without a battery")
+        sec = Section("contracts", "4. Cheapest contract without a battery")
         md = []
         if not self.contracts:
             sec.md = "No contracts to compare."
@@ -462,20 +464,26 @@ class Analysis:
             if f:
                 sec.figures["contract_years"] = f
         else:
-            md.append("Dynamic contracts are skipped: no day-ahead price history was loaded.")
+            md.append("**Dynamic contracts are skipped:** no day-ahead price history was loaded.")
+        md = ["`dynamic contract cost = Σ quarter-hours (spot + markup + energy tax) × import × 1.21 − feed-in income "
+              "+ fixed + grid − tax reduction`",
+              "Each dynamic contract is replayed on every price year (2013–2025) under each set of rules; "
+              "fixed contracts use their stated tariffs."] + md
         unverified = [c.label for c in self.contracts if not c.verified]
+        md.append("#### How to read the tables")
+        md.append("- `expected_eur_year`: average over the price years in the table (last 3 years = headline).")
+        md.append("- `avg_eur_year_over_term`: cost spread over the contract term from the purchase date, switching "
+                  "rules on 1 January 2027, minus the one-off switch bonus. Yearly figures exclude the bonus.")
+        md.append("- `real_months_only` excludes synthetic months.")
         if unverified:
-            md.append(f"Unverified contract terms (hand-entered or template): {', '.join(unverified)}.")
-        md.append("Fixed contracts use their stated tariffs (one value per scenario); dynamic contracts are replayed "
-                  "against every price year under the scenario's rules. `real_months_only` excludes synthetic months. "
-                  "`avg_eur_year_over_term` spreads the cost over the contract term from the purchase date, "
-                  "switching rules on 1 January 2027, and subtracts the one-off switch bonus once. Yearly figures exclude the bonus.")
+            md.append(f"- Unverified contract terms (hand-entered or template): {', '.join(unverified)}.")
         self.expected_by_contract = expected_by_contract
         fv = self.feed_in_value_table()
         if fv is not None:
             sec.tables["feed_in_value_per_year"] = fv
             last = fv.iloc[-1]
-            md.append(f"**Why feed-in earns little on a dynamic contract:** you export mostly around midday, when "
+            md.append("#### Why feed-in earns little on a dynamic contract")
+            md.append(f"- You export mostly around midday, when "
                       f"solar pushes day-ahead prices down. In {int(last.year)} the average spot price was "
                       f"€{last.avg_spot_eur_kwh:.3f}/kWh, but only €{last.avg_spot_when_exporting:.3f} in the quarter-hours "
                       f"you export, and {last.export_at_negative_price_pct:.0f}% of your export fell in negative-price "
@@ -510,7 +518,7 @@ class Analysis:
 
     # ------------------------------------------------------------------ step 4
     def step_batteries(self):
-        sec = Section("batteries", "4. Battery dataset")
+        sec = Section("batteries", "5. Battery options")
         src = self.inp.batteries_csv or self.path("batteries_file")
         bats = load_batteries(src, self.cfg.get("battery_defaults", {})) if src else []
         bset = self.opts.battery_set if self.opts.battery_set is not None else self.cfg.get("battery_set", "all")
@@ -533,7 +541,8 @@ class Analysis:
                 self.batteries.append(b)
             else:
                 self.excluded.append((b, note))
-            rows.append({"id": b.id, "battery": b.name, "type": b.type, "phases": b.phases,
+            rows.append({"id": b.id, "battery": b.name, "size_class": self.class_of(b)[0] or "other",
+                         "type": b.type, "phases": b.phases,
                          "usable_kwh": round(b.usable_kwh, 2), "max_charge_w": b.max_charge_w,
                          "max_discharge_w": b.max_discharge_w,
                          "power_cap_w": None if cap is None else round(min(cap, b.max_charge_w, b.max_discharge_w)),
@@ -548,13 +557,20 @@ class Analysis:
                          "verified": "yes" if b.verified else "no", "in_scope": "yes" if ok else "no", "note": note})
         sec.tables["battery_specs"] = pd.DataFrame(rows)
         d = self.cfg.get("battery_defaults", {})
-        md = [f"{len(bats)} batteries loaded, {len(self.batteries)} in scope for {self.conn.label}.",
-              f"Missing specs are left empty and flagged; the simulation uses documented defaults "
+        counts = {}
+        for b in self.batteries:
+            counts[self.class_of(b)[0] or "other"] = counts.get(self.class_of(b)[0] or "other", 0) + 1
+        md = [f"{len(bats)} batteries loaded, {len(self.batteries)} in scope for {self.conn.label}: "
+              + ", ".join(f"{k}: {v}" for k, v in counts.items()) + ".",
+              "`€ per usable kWh = price ÷ usable capacity` – the main price comparison between sizes.",
+              "#### Missing specs and exclusions",
+              f"- Missing specs are left empty and flagged; the simulation uses documented defaults "
               f"(RTE {d.get('rte')}, standby {d.get('standby_w')} W, cycle life {d.get('cycle_life')}, "
               f"EoL {d.get('eol_capacity')}, warranty {d.get('warranty_years')} yr) and marks the battery as estimated."]
         for b, why in self.excluded:
             md.append(f"- Excluded: {b.name} – {why}.")
-        md.append("`solar_during_outage`: can solar power keep charging the battery when the grid (or the main "
+        md.append("#### Solar during a power outage")
+        md.append("- `solar_during_outage`: can solar power keep charging the battery when the grid (or the main "
                   "switch) is off? Only batteries with their own solar input can: DC panels on the battery's MPPT "
                   "inputs, or a micro-inverter on its backup port (Indevolt 2000 hybrid series). The existing roof "
                   "inverter on the house wiring stops when the grid is gone; keeping it running needs a battery "
@@ -605,28 +621,56 @@ class Analysis:
                               cycles=cycles, de_travel=d.get("de_travel_cost_eur", 0.0),
                               bf=self.cfg.get("blackfriday"))
         sid = "breakeven" if cycles is None else "breakeven_recomputed"
-        sec = Section(sid, ("5. Objective 1 – break-even price per battery" if cycles is None
-                            else "8. Objective 1 recomputed with simulated cycles") + title_suffix)
+        sec = Section(sid, ("6. Break-even price per battery" if cycles is None
+                            else "8. Break-even with simulated cycles") + title_suffix)
         df = pd.DataFrame(rows)
         if len(df):
             sec.tables["breakeven"] = df.round(4)
-        md = [f"Reference prices from {c.label if c else 'n/a'}: average all-in import price "
-              f"€{avg['saldering'][0]:.3f}/kWh; own-solar charge price (feed-in given up) "
-              f"€{avg['saldering'][1]:.3f} under saldering and €{avg['nosal_min50'][1]:.3f} from 2027.",
-              "Break-even = charge price / RTE + wear cost. Under saldering selling and using at home are worth the "
-              "same, so one break-even applies; from 2027 the sell break-even is compared with the net feed-in price. "
-              "Standby is a fixed cost, reported in Objective 3.",
-              "`lifetime_limit` shows which limit (cycles, warranty throughput or calendar life) sets lifetime kWh."]
+        md = ["`break-even price = charge price ÷ RTE + wear`",
+              "`wear = purchase price ÷ kWh the battery delivers over its life`",
+              "`minimum price difference = charge price × (1/RTE − 1) + wear`",
+              "Discharging (or selling) a stored kWh only pays when it is worth at least the break-even price."]
+        if cycles is not None:
+            md.append("Same as section 6, but with each battery's cycles per year from the simulation (section 7) "
+                      "instead of the default; more cycles spread the price over more kWh, so wear drops.")
         md += self.breakeven_explainer(rows)
+        md += ["#### Reference prices",
+               f"- Contract {c.label if c else 'n/a'}: average all-in import price €{avg['saldering'][0]:.3f}/kWh; "
+               f"own-solar charge price (feed-in given up) €{avg['saldering'][1]:.3f} under saldering and "
+               f"€{avg['nosal_min50'][1]:.3f} from 2027.",
+               "- Under saldering selling and using at home are worth the same; from 2027 the sell break-even is "
+               "compared with the net feed-in price. Standby is a fixed cost (section 7).",
+               "- `lifetime_limit` shows which limit (cycles, warranty throughput or calendar life) sets lifetime kWh."]
         if cycles is None:
-            md.append(f"Cycles per year: default {d.get('cycles_per_year', 250)} (replaced by simulated values in section 8).")
+            md.append(f"- Cycles per year: default {d.get('cycles_per_year', 250)} (simulated values in section 8).")
         sec.md = "\n".join(md)
-        priced = [r for r in rows if r["purchase_eur"] is not None and not math.isnan(r["wear_eur_kwh"])]
-        if priced:
-            top = sorted(priced, key=lambda r: r["wear_eur_kwh"])[:5]
-            f = self.fig(charts.breakeven_lines, top)
-            if f:
-                sec.figures["breakeven"] = f
+        priced = [r for r in rows if r["purchase_eur"] is not None and not math.isnan(r["wear_eur_kwh"])
+                  and r["price_variant"] == "NL current"]
+        picks = []
+        if cycles is not None and getattr(self, "focus", None):
+            ids = {f["b"].id: f for f in self.focus}
+            picks = [(ids[r["battery_id"]]["cls"], ids[r["battery_id"]]["color"], r) for r in priced
+                     if r["battery_id"] in ids]
+        else:
+            for lab, lo, hi, color in self.size_classes():
+                inc = [r for r in priced if lo <= self.size_of(self.battery(r["battery_id"])) < hi]
+                if inc:
+                    picks.append((lab, color, min(inc, key=lambda r: r["wear_eur_kwh"])))
+        if picks:
+            xs = [round(x * 0.02, 2) for x in range(0, 21)]
+            sec.interactive["breakeven_lines"] = {
+                "kind": "lines", "unit": "€", "yLabel": "break-even (€/kWh)", "x": xs,
+                "xNames": [f"charging at €{x:.2f}/kWh" for x in xs], "xLabel": "charge price (€/kWh, all-in)",
+                "title": "Break-even price vs charge price" + (" – best battery per size class" if cycles is not None
+                                                                else " – lowest wear per size class"),
+                "subtitle": "Above the line, discharging a stored kWh pays; the grey diagonal is the charge price "
+                            "itself, the gap between them is the minimum price difference.",
+                "endLabels": True, "markers": False, "contextLabel": "charge price (no losses, no wear)",
+                "series": [{"label": "charge price", "values": xs, "context": True}]
+                          + [{"label": f"{lab}: {r['battery']} (RTE {r['rte']:.0%}, wear €{r['wear_eur_kwh']:.3f})",
+                              "short": lab, "color": color,
+                              "values": [round(x / r["rte"] + r["wear_eur_kwh"], 4) for x in xs]}
+                             for lab, color, r in picks]}
         out_dir = self.path("results_dir")
         if out_dir and len(df) and not getattr(self, "no_write", False):
             os.makedirs(out_dir, exist_ok=True)
@@ -640,22 +684,19 @@ class Analysis:
             md_rows = extras.min_difference_rows(self.batteries, wear, cheap, self.taxes.vat)
             if md_rows:
                 sec.tables["minimum_price_difference"] = pd.DataFrame(md_rows)
-                sec.md += ("\n\n**Minimum price difference worth charging** = charge price × (1/RTE − 1) + wear "
-                           "(€/kWh, all-in). The `at_charge_x` columns give it for charging at price x. "
-                           f"`setting_*` is the value to enter in a battery app or Home Assistant (`min_delta`) for a "
-                           f"typical cheap hour (€{cheap:.3f}/kWh all-in, the average of each day's 4 cheapest hours on "
-                           "the cheapest dynamic contract, 2027 rules, last 3 years): `setting_all_in` if the app "
-                           "compares prices incl. taxes, `setting_spot` if it compares spot (EPEX) prices "
-                           "(all-in difference ÷ 1.21, because taxes per kWh are equal every hour).")
+                sec.md += ("\n#### Minimum price difference: the setting for your battery app"
+                           "\n- `at_charge_x` columns: the minimum difference when charging at price x."
+                           f"\n- `setting_*`: the value to enter as `min_delta` for a typical cheap hour "
+                           f"(€{cheap:.3f}/kWh all-in, average of each day's 4 cheapest hours, cheapest dynamic "
+                           "contract, 2027 rules). `setting_all_in` if the app compares prices incl. taxes, "
+                           "`setting_spot` if it compares spot (EPEX) prices (= all-in ÷ 1.21).")
         self.emit(sec)
 
     def breakeven_explainer(self, rows) -> list[str]:
         """Plain-language formula with a worked example (first priced battery)."""
         ex = next((r for r in rows if r["price_variant"] == "NL current" and r["purchase_eur"]
                    and not math.isnan(r["wear_eur_kwh"])), None)
-        out = ["",
-               "**How the break-even price is calculated**",
-               "",
+        out = ["#### How the break-even price is calculated",
                "`break-even price = charge price / RTE + wear cost` (€ per kWh delivered, all-in).",
                "- **charge price / RTE** turns the price of a kWh *put into* the battery into the price of a kWh "
                "*coming out*: with a round-trip efficiency (RTE) of 85% you lose 15%, so each delivered kWh costs "
@@ -696,7 +737,7 @@ class Analysis:
 
     # ------------------------------------------------------------------ step 1b
     def step_power(self):
-        sec = Section("power", "1b. Power profile")
+        sec = Section("power", "2. Power profile")
         raw = None
         src = self.inp.p1 or self.path("p1_file")
         cols = self.cfg["p1"].get("phase_max_columns") or []
@@ -711,12 +752,12 @@ class Analysis:
         if phases is not None:
             sec.tables["peak_per_phase"] = phases.round(2)
         c8 = cover.set_index("battery_power_kw")
-        md = ["Power from the 15-minute meter data (real months only). A battery can only store surplus or cover "
-              "load up to its own power, so `battery_power_vs_energy` shows how much of the yearly surplus a battery "
-              "of that power can store, and how much of the import it can cover.",
+        md = ["A battery can only store surplus and cover load up to its own power.",
               f"- An 800 W socket battery can store {c8.loc[0.8, 'share_of_surplus_it_can_store']:.0%} of the surplus and "
               f"cover {c8.loc[0.8, 'share_of_import_it_can_cover']:.0%} of the import; 2.4 kW: "
               f"{c8.loc[2.4, 'share_of_surplus_it_can_store']:.0%} / {c8.loc[2.4, 'share_of_import_it_can_cover']:.0%}.",
+              "#### Notes",
+              "- Power from the 15-minute meter data (real months only).",
               "- 15-minute averages hide short peaks (kettle, induction hob). `peak_per_phase` uses the meter's own "
               "per-phase maximum (W) per interval, when the P1 file has those columns.",
               f"- Connection {self.conn.label}: {self.conn.phase_kw:.2f} kW per phase; batteries are capped at "
@@ -729,43 +770,59 @@ class Analysis:
 
     # ------------------------------------------------------------------ step 6
     def step_sanity(self):
-        sec = Section("sanity", "6. Self-consumption sanity check")
-        if not self.batteries:
+        sec = Section("sanity", "9. Battery over the year – check per size")
+        focus = getattr(self, "focus", None) or []
+        bats = [(f["cls"], f["color"], f["b"]) for f in focus]
+        if not bats and self.batteries:
+            b = min(self.batteries, key=lambda x: (len(x.missing_fields), x.usable_kwh))
+            bats = [(self.class_of(b)[0] or "battery", self.CLASS_COLORS[0], b)]
+        if not bats:
             sec.md = "No battery in scope."
             self.emit(sec)
             return
-        b = min(self.batteries, key=lambda x: (len(x.missing_fields), x.usable_kwh))
-        cap = self.conn.battery_cap_w(b.phases)
         net = self.profile["imp"].values - self.profile["exp"].values
-        r = simulate(net, SELF, b, cap, keep_trace=True)
-        balance = np.abs((r.imp - r.exp) - (net + (b.standby_w or 0) / 4000.0 + r.batt_ac)).max()
-        md = [f"Battery: **{b.name}** ({b.usable_kwh:.2f} kWh usable, cap {min(cap, b.max_charge_w):.0f} W), "
-              f"self-consumption on the profile year.",
-              f"- Equivalent full cycles: {r.efc:.0f}/yr; charged {r.charged_ac:,.0f} kWh AC, "
-              f"delivered {r.discharged_ac:,.0f} kWh AC; capacity at year end {r.end_capacity:.2f} kWh.",
-              f"- Import {self.profile['imp'].sum():,.0f} → {r.imp.sum():,.0f} kWh; "
-              f"export {self.profile['exp'].sum():,.0f} → {r.exp.sum():,.0f} kWh.",
-              f"- Energy balance (import − export = net load + standby + battery AC flow): max error {balance:.2e} kWh."]
-        sec.md = "\n".join(md)
         idx = self.profile.index
-        sb = (b.standby_w or 0) / 4000.0
-        daily = extras.daily_battery(idx, net, r.batt_ac, r.soc, b.usable_kwh, sb)
-        md.append(f"- Whole year: the battery is completely full on {int(daily.full.sum())} days and "
-                  f"stays below half full on {int((daily.max_soc_kwh < 0.5 * b.usable_kwh).sum())} days (mostly winter).")
-        f = self.fig(charts.soc_year, daily, b.usable_kwh, f"{b.name}: whole year, self-consumption")
-        if f:
-            sec.figures["soc_year_daily"] = f
-        sec.interactive["soc_year_15min"] = {
-            "title": f"{b.name} – state of charge and house power, every 15 minutes",
-            "y": "kWh / kW", "height": 340,
-            "x": extras.ts(idx),
-            "series": [extras.series("State of charge (kWh)", r.soc, "#2a6f97", "area"),
-                       extras.series("House net power without battery (kW, + import / − export)", net * 4, "#e07a5f",
-                                     width=0.8),
-                       extras.series("Battery power (kW, + charging / − discharging)", r.batt_ac * 4, "#3d405b",
-                                     width=0.8)]}
+        rows, soc_series, chosen_run = [], [], None
+        for cls, color, b in bats:
+            cap = self.conn.battery_cap_w(b.phases)
+            r = simulate(net, SELF, b, cap, keep_trace=True)
+            sb = (b.standby_w or 0) / 4000.0
+            balance = np.abs((r.imp - r.exp) - (net + sb + r.batt_ac)).max()
+            daily = extras.daily_battery(idx, net, r.batt_ac, r.soc, b.usable_kwh, sb)
+            rows.append({"size_class": cls, "battery": b.name, "usable_kwh": b.usable_kwh,
+                         "efc_per_year": r.efc, "charged_kwh": r.charged_ac, "delivered_kwh": r.discharged_ac,
+                         "import_before_kwh": self.profile["imp"].sum(), "import_after_kwh": r.imp.sum(),
+                         "export_before_kwh": self.profile["exp"].sum(), "export_after_kwh": r.exp.sum(),
+                         "days_full": int(daily.full.sum()),
+                         "days_below_half": int((daily.max_soc_kwh < 0.5 * b.usable_kwh).sum()),
+                         "end_capacity_kwh": r.end_capacity, "balance_error_kwh": balance})
+            soc_series.append(extras.series(f"{cls}: {b.name} – state of charge (kWh)", r.soc, color))
+            if chosen_run is None or (getattr(self, "chosen", None) is not None and b.id == self.chosen.id):
+                chosen_run = (cls, b, r)
+        df = pd.DataFrame(rows)
+        sec.tables["self_consumption_check"] = df.round(2)
+        worst = df.balance_error_kwh.max()
+        md = ["Each size class's best battery on your profile year with plain self-consumption: does the "
+              "simulation behave?",
+              "`import − export = house net load + standby + battery flow` must hold every 15 minutes "
+              f"(largest error: {worst:.1e} kWh).",
+              "`full cycles = energy delivered ÷ usable capacity`"]
+        md += [f"- **{r.size_class}:** full on {r.days_full} days, below half full on {r.days_below_half} days, "
+               f"{r.efc_per_year:.0f} cycles, import {r.import_before_kwh:,.0f} → {r.import_after_kwh:,.0f} kWh"
+               for r in df.itertuples()]
         sec.md = "\n".join(md)
-        self.sanity = {"battery": b.id, "efc": r.efc, "balance_error": balance}
+        sec.interactive["soc_year_15min"] = {
+            "title": "State of charge per size class – whole year, every 15 minutes",
+            "y": "kWh", "height": 320, "x": extras.ts(idx), "series": soc_series}
+        cls, b, r = chosen_run
+        sec.interactive["power_year_15min"] = {
+            "title": f"{cls}: {b.name} – house and battery power, every 15 minutes",
+            "y": "kW", "height": 300, "x": extras.ts(idx), "group": "Power flows of the recommended battery",
+            "series": [extras.series("House net power without battery (kW, + import / − export)", net * 4, "#2a78d6",
+                                     width=0.8),
+                       extras.series("Battery power (kW, + charging / − discharging)", r.batt_ac * 4, "#eb6834",
+                                     width=0.8)]}
+        self.sanity = {"battery": b.id, "efc": r.efc, "balance_error": worst}
         self.emit(sec)
 
     # ------------------------------------------------------------------ step 7
@@ -856,7 +913,7 @@ class Analysis:
         return best
 
     def step_payback(self):
-        sec = Section("payback", "7. Objective 3 – battery payback per strategy")
+        sec = Section("payback", "7. Payback per battery size and strategy")
         if not self.batteries:
             sec.md = "No battery in scope."
             self.emit(sec)
@@ -911,48 +968,62 @@ class Analysis:
         self._meta = meta
         summary = self.payback_table(rec, meta, contracts)
         self.payback_summary = summary
-        md = [f"Savings = cost without battery − cost with battery under the same contract, rules and price year "
-              f"(standby and losses included). Payback follows the purchase date "
-              f"{self.cfg['analysis']['purchase_date']} year by year: 2026 rules until the end of 2026, then "
-              f"2027–2029 rules, then 2030+ rules, with capacity fading towards end of life.",
-              "Dynamic and Sell use each battery's own break-even (NL current price) from Objective 1; "
-              "decisions use only that day's day-ahead prices, and stored energy is reserved for the day's "
-              "priciest load. **Home Battery Control cannot do this reservation today**: `dynamic` needs custom "
-              "control. `hbc_*` strategies reproduce Home Battery Control's Dynamic strategy exactly "
-              "(Extreme-Pair Matching, presets in config.yaml), so those results are achievable as-is. "
-              "`forecast` re-plans every day at 13:00 over the prices known then (until tomorrow night) with a "
-              "usage/solar forecast from the last 3 days, the way EMHASS does in Home Assistant (custom control, "
-              "headline years only). `perfect_foresight` is the upper bound (headline years only).",
-              "For fixed contracts there is one value (stated tariffs); for dynamic contracts the min–max is the "
-              "payback across price years. Partial price years are excluded from the ranges."]
-        if (self.prices is None):
+        self.focus = self.pick_focus(summary)
+        self.chosen = self.pick_battery(summary)
+        adv = self.advice_contract()
+        md = ["`saving = yearly cost without battery − yearly cost with battery` (same contract, rules and price year)",
+              "`payback = years until the savings add up to the price` (2026 rules until the end of 2026, then "
+              "2027–2029 rules, then 2030+ rules; capacity fades with use)",
+              f"Comparison basis: the best battery per size class ({', '.join(f['cls'] for f in self.focus) or '–'}) "
+              f"on {adv.label if adv else 'the best contract'}."]
+        if self.focus:
+            md += [f"- **{f['cls']}:** {f['b'].name} – `{f['strategy']}`, payback {f['row']['payback_years']:.1f} "
+                   f"years, €{f['row']['_saving27']:,.0f} a year from 2027" for f in self.focus]
+        md += ["#### Strategies explained",
+               "- `self_consumption`: store solar surplus, use it when the house imports. Works in every battery app.",
+               "- `timed`: fixed daily charge/discharge windows, searched on the last price year.",
+               "- `dynamic` / `dynamic_sell`: per day, pair the cheapest and the most expensive hours when the "
+               "difference beats the break-even (section 6), keep stored energy for the priciest load; `_sell` may "
+               "also sell. Needs custom control.",
+               "- `forecast`: every day at 13:00, optimise over the prices known until tomorrow night and a "
+               "usage/solar forecast from the last 3 days (like EMHASS in Home Assistant). Needs custom control. "
+               "Last 3 price years only.",
+               "- `hbc_default` / `hbc_pv_first`: Home Battery Control's Dynamic strategy as-is.",
+               "- `perfect_foresight`: knows all prices and usage in advance – the upper limit, not achievable. "
+               "Last 3 price years only.",
+               "#### Ranges and assumptions",
+               "- Dynamic contracts: the payback min–max is the spread over the price years; partial years are "
+               "left out.",
+               f"- Purchase date {self.cfg['analysis']['purchase_date']}; net present value at "
+               f"{float(self.cfg['analysis'].get('discount_rate', 0.03)):.0%} a year."]
+        if self.prices is None:
             md.append("**No price history loaded:** only fixed-contract combinations were simulated.")
         estimated = [b.name for b in self.batteries if b.estimated]
         if estimated:
-            md.append(f"Estimated (defaults used for missing specs): {', '.join(estimated)}.")
+            md.append(f"- Estimated specs (defaults used): {', '.join(estimated)}.")
         windows = [f"{self.bname(bid)} × {self.cname(cid)}: " + (", ".join(
             f"{'charge' if m == GRID_CHARGE else 'discharge'} {a:02d}–{z:02d}" for a, z, m in v['windows'])
-            or "no window beats self-consumption") for (bid, cid), v in meta.items() if v["windows"] is not None]
+            or "none beats self-consumption") for (bid, cid), v in meta.items() if v["windows"] is not None]
         if windows:
-            md.append("Timed windows found on history (2027 rules): " + "; ".join(windows[:12]))
+            md += ["#### Timed windows found (2027 rules)"] + [f"- {w}" for w in windows]
         sec.tables["savings_by_combination"] = summary["savings"].round(2)
         if len(summary["ranked"]):
             sec.tables["payback_ranked"] = summary["ranked"].round(2)
-            f = self.fig(charts.payback_scatter, summary["ranked"].replace([np.inf], np.nan).dropna(subset=["payback_years"]))
-            if f:
-                sec.figures["payback_vs_capacity"] = f
+            for name, spec in (("payback_vs_size", self.payback_scatter_spec(summary["ranked"])),
+                               ("cumulative_return", self.cumulative_spec(summary["ranked"]))):
+                if spec:
+                    sec.interactive[name] = spec
         else:
             md.append("**No payback ranking:** no battery has a purchase price yet. Savings per year are shown above.")
-        # scale variants
         sv = self.scale_variants(meta, contracts)
         if sv is not None:
             sec.tables["dynamic_breakeven_scale"] = sv.round(2)
         sens = self.sensitivity(summary, meta, contracts)
         if sens is not None:
             sec.tables["sensitivity"] = sens.round(2)
-        ys = self.savings_year_chart(rec)
+        ys = self.savings_year_spec(rec)
         if ys:
-            sec.figures["savings_per_price_year"] = ys
+            sec.interactive["savings_per_price_year"] = ys
         bft = self.blackfriday_table(summary)
         if bft is not None:
             sec.tables["black_friday_quick_decision"] = bft
@@ -960,31 +1031,33 @@ class Analysis:
             w = bfc.get("window", ["11-20", "12-01"])
             found = bft["nl_deal_eur"].notna().any() or bft["de_deal_eur"].notna().any()
             est = bool(bfc.get("estimates", True))
-            md.append(f"**Black Friday quick decision** (window {w[0]} – {w[1]}, Black Friday {bfc.get('date', '')}): "
-                      "per battery its best contract and strategy, today's price, the real deal price the scraper "
-                      "found during the window (NL incl. VAT, DE 0% VAT from German manufacturer shops) with the "
-                      "discount against the last normal price"
-                      + (f", and the estimate (−{float(bfc.get('discount_nl', 0.15)):.0%} NL / "
-                         f"−{float(bfc.get('discount_de', 0.15)):.0%} DE)" if est else " (estimates switched off)")
-                      + ". Sorted by the best available payback. "
-                      + ("" if found else "No real deals recorded yet: the scraper fills them in during the window "
-                         "(every 4 hours)" + (", until then the estimate columns apply." if est else ".")))
-        self.chosen = self.pick_battery(summary)
-        if self.chosen is not None:
-            split = self.earnings_by_strategy(self.chosen, contracts, meta)
-            if split is not None:
-                tbl, fig = split
-                sec.tables[f"earnings_per_year_{self.chosen.id}"] = tbl.round(0)
-                if fig:
-                    sec.figures["earnings_per_strategy"] = fig
-                md.append(f"**Earnings per strategy** for {self.chosen.name} (chosen battery): each year of "
-                          "ownership split into avoided import, energy sold, feed-in given up for stored solar, "
-                          "grid charging cost, and standby/other (saldering netting, feed-in tiers). Bars stack to "
-                          "the net saving (black dot); later years shrink as capacity fades.")
-            gap = self.strategy_gap(self.chosen, self.cheapest_dynamic(), meta)
-            if gap is not None and len(gap):
-                sec.tables[f"gap_to_perfect_foresight_{self.chosen.id}"] = gap.round(1)
-                md.append(self.gap_text(gap))
+            md += [f"#### Black Friday quick decision (window {w[0]} – {w[1]})",
+                   "- Per battery: best contract and strategy, today's price, the real deal the scraper found "
+                   "(NL incl. VAT, DE 0% VAT from German manufacturer shops) and its discount against the last "
+                   "normal price."
+                   + (f" Estimate: −{float(bfc.get('discount_nl', 0.15)):.0%} NL / "
+                      f"−{float(bfc.get('discount_de', 0.15)):.0%} DE." if est else " Estimates are switched off."),
+                   "- " + ("Real deals recorded." if found else "No real deals recorded yet: the scraper checks every "
+                           "4 hours during the window.")]
+        ef = self.earnings_focus(meta)
+        if ef is not None:
+            avg, specs, per_year, ey, ec = ef
+            sec.tables["earnings_average_full_year"] = avg.round(0)
+            sec.tables["earnings_per_ownership_year"] = per_year.round(0)
+            sec.csv_only.add("earnings_per_ownership_year")
+            for k, v in specs.items():
+                v["group"] = "Earnings per strategy – average full year, per size class"
+                sec.interactive[k] = v
+            md += ["#### Earnings per strategy",
+                   "`net saving = avoided import + sold to grid − feed-in given up − grid charging − standby/other`",
+                   f"- Average over the full years of ownership ({ey} prices on {ec.label}); the partial purchase "
+                   "year (2026) and the partial last year are left out.",
+                   "- `timed` shows large bars because it cycles from the grid every day: big avoided import, "
+                   "big grid-charging cost, the net is what counts."]
+        gap = self.strategy_gap(meta)
+        if gap is not None and len(gap):
+            sec.tables["gap_to_perfect_foresight"] = gap.round(0)
+            md.append(self.gap_text(gap))
         sec.md = "\n".join(md)
         self.emit(sec)
         # Recompute Objective 1 with simulated cycles (best strategy per battery).
@@ -1015,7 +1088,8 @@ class Analysis:
             pb = dict(zip(same.price_variant, same.payback_years))
             pr = dict(zip(same.price_variant, same.price_eur))
             disc = lambda deal, ref: (1 - deal / ref) if (deal and ref) else None
-            row = {"battery": r["battery"], "usable_kwh": r["usable_kwh"], "contract": r["contract"],
+            row = {"size_class": self.class_of(b)[0] or "other",
+                   "battery": r["battery"], "usable_kwh": r["usable_kwh"], "contract": r["contract"],
                    "strategy": r["strategy"],
                    "nl_now_eur": pr.get("NL current"), "payback_now": pb.get("NL current"),
                    "nl_deal_eur": b.price_bf_nl, "nl_deal_discount": disc(b.price_bf_nl, b.price_nl_ref),
@@ -1029,7 +1103,10 @@ class Analysis:
             row["best_payback"] = min(cands) if cands else min(
                 v for v in (row["payback_nl_est"], row["payback_now"]) if v is not None)
             rows.append(row)
-        df = pd.DataFrame(rows).sort_values("best_payback").reset_index(drop=True)
+        df = pd.DataFrame(rows)
+        order = {lab: i for i, (lab, *_rest) in enumerate(self.size_classes())}
+        df = (df.assign(_o=df.size_class.map(order).fillna(99)).sort_values(["_o", "best_payback"])
+              .drop(columns="_o").reset_index(drop=True))
         if not (self.cfg.get("blackfriday", {}) or {}).get("estimates", True):
             df = df.drop(columns=["nl_est_eur", "payback_nl_est", "payback_de_est"])
         for c in ("nl_deal_discount", "de_deal_discount"):
@@ -1062,190 +1139,402 @@ class Analysis:
             lim.append(b.cycle_life / efc)
         return min(min(lim), float(self.cfg["analysis"].get("horizon_years", 20)))
 
-    def earnings_by_strategy(self, b: Battery, contracts, meta):
-        c = self.cheapest_dynamic() or (contracts[0] if contracts else None)
-        if c is None:
+    # ------------------------------------------------------------------ size classes
+    CLASS_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]          # validated categorical slots 1-3
+    EARN_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
+    EARN_KEYS = [("avoided_import", "Avoided import"), ("sold_to_grid", "Sold to grid"),
+                 ("solar_feed_in_given_up", "Feed-in given up (stored solar)"),
+                 ("grid_charging", "Grid charging"), ("standby_and_other", "Standby / other")]
+
+    def size_classes(self):
+        a = self.cfg.get("analysis", {})
+        half = float(a.get("size_class_halfwidth_kwh", 2.5))
+        return [(f"{c:g} kWh", float(c) - half, float(c) + half, self.CLASS_COLORS[i % 3])
+                for i, c in enumerate(a.get("size_classes_kwh", [5, 10, 15]))]
+
+    def size_of(self, b: Battery) -> float:
+        return b.nominal_kwh or b.usable_kwh
+
+    def class_of(self, b: Battery):
+        for label, lo, hi, color in self.size_classes():
+            if lo <= self.size_of(b) < hi:
+                return label, color
+        return None, None
+
+    def battery(self, bid):
+        return next(x for x in self.batteries if x.id == bid)
+
+    def achievable_ranked(self, rk: pd.DataFrame) -> pd.DataFrame:
+        """Fastest-payback row per battery: headline years, today's NL price, achievable
+        strategies, on the advice contract."""
+        h = rk[(rk.analysis == "headline") & (rk.price_variant == "NL current") & (rk.strategy != "perfect_foresight")]
+        adv = self.advice_contract()
+        if adv is not None and (h._cid == adv.id).any():
+            h = h[h._cid == adv.id]
+        return h.sort_values("payback_years").drop_duplicates("_bid")
+
+    def pick_focus(self, summary) -> list[dict]:
+        """The best-value battery of each size class (5/10/15 kWh ± 2.5): these three
+        are followed through every later section. A fixed chosen battery replaces
+        the winner of its own class."""
+        rk = summary.get("ranked") if summary else None
+        if rk is None or rk.empty:
+            return []
+        best = self.achievable_ranked(rk)
+        want = self.opts.chosen_battery or self.cfg.get("chosen_battery")
+        out = []
+        for label, lo, hi, color in self.size_classes():
+            sel = best[best._bid.map(lambda i: lo <= self.size_of(self.battery(i)) < hi)]
+            if sel.empty:
+                continue
+            r = sel[sel._bid == want].iloc[0] if want and (sel._bid == want).any() else sel.iloc[0]
+            out.append({"cls": label, "color": color, "b": self.battery(r["_bid"]),
+                        "c": next(x for x in self.contracts if x.id == r["_cid"]), "strategy": r["strategy"],
+                        "row": r})
+        return out
+
+    def short_name(self, b: Battery) -> str:
+        return re.sub(r"\s*\(.*\)$", "", b.name)
+
+    # ------------------------------------------------------------------ payback charts
+    def payback_scatter_spec(self, rk):
+        best = self.achievable_ranked(rk)
+        best = best[np.isfinite(best.payback_years.astype(float))]
+        if best.empty:
             return None
-        if c not in contracts and c.id not in [x.id for x in contracts]:
-            contracts = contracts + [c]
+        focus = {f["b"].id: f for f in getattr(self, "focus", [])}
+        pts, outside = [], False
+        for r in best.to_dict("records"):
+            b = self.battery(r["_bid"])
+            cls, color = self.class_of(b)
+            outside |= cls is None
+            col = color or "#a3a29d"
+            pts.append({"x": round(b.usable_kwh, 2), "y": round(float(r["payback_years"]), 2), "label": b.name,
+                        "color": col, "strong": b.id in focus,
+                        "short": f"{cls}: {self.short_name(b)}" if b.id in focus else "",
+                        "rows": [[col, f"{r['payback_years']:.1f} years", "payback"],
+                                 [col, f"€{r['price_eur']:,.0f}", "price"],
+                                 [col, f"€{r['_saving27']:,.0f} a year", f"saving from 2027 ({r['strategy']})"],
+                                 [col, f"€{r['npv_eur']:,.0f}", "net present value"]]})
+        legend = [{"label": lab, "color": col} for lab, _, _, col in self.size_classes()]
+        if outside:
+            legend.append({"label": "outside the size classes", "color": "#a3a29d"})
+        c = self.advice_contract()
+        return {"kind": "scatter", "title": "Payback time per battery",
+                "subtitle": f"One dot per battery: its best strategy on {c.label if c else 'the best contract'}, at "
+                            "today's NL price. Lower is better; the best of each size class is labelled.",
+                "xLabel": "usable capacity (kWh)", "yLabel": "payback (years)", "yUnit": "yr",
+                "points": pts, "legend": legend, "height": 340}
+
+    def cumulative_spec(self, rk):
+        best = self.achievable_ranked(rk)
+        if best.empty:
+            return None
+        start = pd.Timestamp(self.cfg["analysis"]["purchase_date"])
+        s0 = start.year + (start.dayofyear - 1) / 365.0
+        grid = sorted({round(s0 + t, 3) for p in best["_path"] for t, _ in p})
+        focus = {f["b"].id: f for f in getattr(self, "focus", [])}
+        series, points = [], []
+        for r in best.to_dict("records"):
+            path = {round(s0 + t, 3): v for t, v in r["_path"]}
+            vals = [round(path[x], 1) if x in path else None for x in grid]
+            f = focus.get(r["_bid"])
+            if f:
+                series.append({"label": f"{f['cls']}: {f['b'].name} ({r['strategy']})", "short": f["cls"],
+                               "color": f["color"], "values": vals})
+                if np.isfinite(r["payback_years"]):
+                    points.append({"x": round(s0 + r["payback_years"], 3), "y": 0, "color": f["color"],
+                                   "label": f"{r['payback_years']:.1f} yr"})
+            else:
+                series.append({"label": self.bname(r["_bid"]), "values": vals, "context": True})
+        series.sort(key=lambda s: 0 if s.get("context") else 1)
+        names = [f"purchase {start.date()}"] + [f"1 Jan {round(x)}" if abs(x - round(x)) < 1e-6
+                                                 else f"end of life ({x:.1f})" for x in grid[1:]]
+        c = self.advice_contract()
+        return {"kind": "lines", "title": "Cumulative return: when the savings have paid for the battery",
+                "subtitle": f"Starts at minus the price on {start.date()}, then adds each year's saving (best strategy on "
+                            f"{c.label if c else 'the best contract'}, capacity fading). The line crosses zero in the "
+                            "payback year and ends at the battery's end of life. Grey: the other batteries.",
+                "x": grid, "xNames": names, "xTicks": list(range(math.ceil(s0), math.floor(grid[-1]) + 1)),
+                "xFormat": "year", "unit": "€", "yLabel": "€ cumulative", "zero": True, "markers": False,
+                "endLabels": True, "series": series, "points": points, "contextLabel": "other batteries",
+                "height": 380}
+
+    def savings_year_spec(self, rec):
+        if rec.empty or self.prices is None or not getattr(self, "focus", None):
+            return None
+        yrs = rec[rec.price_year.apply(lambda x: isinstance(x, (int, np.integer))) & (rec.scenario == "nosal_min50")
+                  & ~rec.partial]
+        if yrs.empty:
+            return None
+        x = sorted(int(v) for v in yrs.price_year.unique())
+        series, swapped = [], False
+        for f in self.focus:
+            g = yrs[(yrs.battery_id == f["b"].id) & (yrs.contract_id == f["c"].id)]
+            strat = f["strategy"]
+            if g[g.strategy == strat].price_year.nunique() < len(x):     # LP strategies: headline years only
+                full = g.groupby("strategy").filter(lambda d: d.price_year.nunique() >= len(x))
+                if len(full):
+                    strat = full.groupby("strategy").saving.mean().idxmax()
+                    swapped = True
+            s = g[g.strategy == strat].set_index("price_year").saving
+            series.append({"label": f"{f['cls']}: {f['b'].name} ({strat})", "short": f["cls"], "color": f["color"],
+                           "values": [round(float(s.get(y)), 1) if y in s.index else None for y in x]})
+        return {"kind": "lines", "title": "Yearly saving per price year, per size class",
+                "subtitle": "The same battery and contract replayed on the prices of each year, 2027–2029 rules."
+                            + (" `forecast` only runs on the last 3 years, so its battery shows its best strategy "
+                               "with the full history." if swapped else ""),
+                "x": x, "xFormat": "year", "unit": "€", "yLabel": "€ per year", "zero": True, "endLabels": True,
+                "series": series, "height": 320}
+
+    # ------------------------------------------------------------------ earnings per strategy
+    def earnings_years(self, b: Battery, c: Contract, meta, year_label):
+        """Per ownership year and strategy: the saving split into its parts, using one
+        price year (2027 rules for 2027-2029, 2030 rules after)."""
         cap = self.conn.battery_cap_w(b.phases)
         m = meta.get((b.id, c.id), {"windows": [], "wear": self.wear_for(b)[0]})
-        per_scn = {}
-        efc_by = {}
+        comp, efcs = {}, {}
         for strat in self.strategies_for(c):
             if strat == "timed" and not m["windows"]:
                 continue
-            for scn in self.scenarios:
-                parts, efcs = [], []
-                for label, per, idx, _ in self.periods(c, scn, self.head_years if c.is_dynamic else None):
-                    r = self.sim_strategy(strat, b, cap, per, idx, c, scn, m["wear"], windows=m["windows"])
-                    sv = self.saving(r, per, c, scn)
-                    u, s_ = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
-                    sb = (b.standby_w or 0.0) / 1000.0 * 0.25
-                    parts.append(extras.earnings_split(per.imp - per.exp, r.batt_ac, sb, u, s_, sv))
-                    efcs.append(r.efc)
-                if parts:
-                    per_scn[(strat, scn)] = pd.DataFrame(parts).mean().to_dict()
-                    efc_by[(strat, scn)] = float(np.mean(efcs))
-        if not per_scn:
-            return None
+            for scn in ("nosal_min50", "nosal_2030"):
+                pers = self.periods(c, scn, [year_label] if c.is_dynamic else None)
+                if not pers:
+                    continue
+                _, per, idx, _ = pers[-1]
+                r = self.sim_strategy(strat, b, cap, per, idx, c, scn, m["wear"], windows=m["windows"])
+                sv = self.saving(r, per, c, scn)
+                u, s_ = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
+                sb = (b.standby_w or 0.0) / 1000.0 * 0.25
+                comp[(strat, scn)] = extras.earnings_split(per.imp - per.exp, r.batt_ac, sb, u, s_, sv)
+                efcs[(strat, scn)] = r.efc
         start = pd.Timestamp(self.cfg["analysis"]["purchase_date"])
         rows = []
-        for strat in sorted({k[0] for k in per_scn}):
-            efc = efc_by.get((strat, "nosal_min50"), 250.0)
+        for strat in dict.fromkeys(k[0] for k in comp):
+            efc = efcs.get((strat, "nosal_min50"), 250.0)
             life = self.life_years(b, efc)
             t, year = 0.0, start.year
             first = (pd.Timestamp(year=year + 1, month=1, day=1) - start).days / 365.0
             while t < life - 1e-9:
                 frac = min(first if t == 0 else 1.0, life - t)
                 scn = regime_for_year(self.cfg, year)
-                comp = per_scn.get((strat, scn)) or per_scn.get((strat, "nosal_min50"))
+                parts = comp.get((strat, scn)) or comp.get((strat, "nosal_min50"))
                 capf = 1.0 - (1.0 - b.eol_capacity) * min(efc * (t + frac / 2) / (b.cycle_life or 1e12), 1.0)
-                row = {"strategy": strat, "year": year, "rules": self.regimes[scn]["label"]}
-                for k, v in comp.items():
-                    row[k] = v * frac * capf
-                row["net_saving"] = sum(comp.values()) * frac * capf
+                row = {"strategy": strat, "year": year, "rules": self.regimes[scn]["label"],
+                       "full_year": frac > 0.999}
+                for k, _ in self.EARN_KEYS:
+                    row[k] = parts[k] * frac * capf
+                row["net_saving"] = sum(parts[k] for k, _ in self.EARN_KEYS) * frac * capf
                 rows.append(row)
                 t += frac
                 year += 1
-        tbl = pd.DataFrame(rows)
-        fig = self.fig(charts.earnings_stacked, tbl, f"{b.name} – {c.label}")
-        return tbl, fig
+        return pd.DataFrame(rows)
 
-    def strategy_gap(self, b: Battery, c: Contract, meta) -> pd.DataFrame | None:
-        """Where the gap between the achievable strategies and perfect foresight
-        comes from (2027–2029 rules, headline years): the same optimiser with
-        less knowledge, and perfect foresight with fewer freedoms."""
-        if c is None or not c.is_dynamic:
+    def earnings_focus(self, meta):
+        """Average full ownership year per strategy for each size class (the partial
+        purchase year and the partial last year are left out)."""
+        c = self.cheapest_dynamic() or self.current
+        if c is None or not getattr(self, "focus", None):
             return None
-        scn = "nosal_min50"
-        years = self.head_years[-1:] if self.opts.quick else self.head_years
-        pers = self.periods(c, scn, years)
+        year = self.head_years[-1] if (c.is_dynamic and self.head_years) else "profile"
+        avg_rows, specs, per_year = [], [], []
+        for f in self.focus:
+            tbl = self.earnings_years(f["b"], c, meta, year)
+            if tbl.empty:
+                continue
+            per_year.append(tbl.assign(size_class=f["cls"], battery=f["b"].name))
+            full = tbl[tbl.full_year]
+            if full.empty:
+                full = tbl
+            avg = full.groupby("strategy", sort=False)[[k for k, _ in self.EARN_KEYS] + ["net_saving"]].mean()
+            yrs = full.groupby("strategy", sort=False).year.agg(["min", "max"])
+            for strat, r in avg.iterrows():
+                avg_rows.append({"size_class": f["cls"], "battery": f["b"].name, "strategy": strat,
+                                 **{k: r[k] for k, _ in self.EARN_KEYS}, "net_saving": r["net_saving"],
+                                 "years": f"{yrs.loc[strat, 'min']}–{yrs.loc[strat, 'max']}"})
+            specs.append((f, avg))
+        if not avg_rows:
+            return None
+        df = pd.DataFrame(avg_rows)
+        lo = min(0.0, df[[k for k, _ in self.EARN_KEYS if k != "avoided_import"]].clip(upper=0).sum(axis=1).min())
+        hi = df[["avoided_import", "sold_to_grid"]].clip(lower=0).sum(axis=1).max()
+        charts_ = {}
+        for f, avg in specs:
+            charts_[f"earnings_{f['cls']}"] = {
+                "kind": "bars", "stacked": True, "rotate": True, "unit": "€", "yLabel": "€ per year",
+                "title": f"{f['cls']}: {f['b'].name} – average full year per strategy",
+                "subtitle": f"{year} prices; 2027–2029 rules until 2029, 2030+ rules after; capacity fading included. "
+                            "Gains stack upwards, costs downwards; the dot is the net saving.",
+                "categories": list(avg.index), "ydomain": [lo, hi],
+                "series": [{"label": lab, "color": self.EARN_COLORS[i], "values": [round(float(v), 1) for v in avg[k]]}
+                           for i, (k, lab) in enumerate(self.EARN_KEYS)],
+                "total": {"label": "Net saving", "values": [round(float(v), 1) for v in avg["net_saving"]]}}
+        return df, charts_, pd.concat(per_year, ignore_index=True), year, c
+
+    # ------------------------------------------------------------------ gap to perfect foresight
+    GAP_ROWS = [
+        ("self_consumption", "nothing: store surplus, use it when the house imports", "rec", {}),
+        ("timed", "fixed windows, chosen on the last price year (in-sample)", "rec", {}),
+        ("dynamic", "today's day-ahead prices + yesterday's usage", "rec", {}),
+        ("dynamic_sell", "same, may sell to the grid", "rec", {}),
+        ("forecast", "prices until tomorrow night + usage/solar of the last 3 days", "rec", {}),
+        ("forecast, perfect usage forecast", "same optimiser, knows the real usage and solar", "oracle", {}),
+        ("bound: solar only, no selling", "everything; stores only solar, covers only own load", "pf",
+         {"grid_charge": False, "sell": False}),
+        ("bound: solar only, may sell", "everything; stores only solar, may sell it", "pf", {"grid_charge": False}),
+        ("bound: grid charging, no selling", "everything; may charge from the grid, no selling", "pf",
+         {"sell": False}),
+        ("perfect_foresight", "everything in advance, all freedoms", "rec", {}),
+    ]
+
+    def strategy_gap(self, meta) -> pd.DataFrame | None:
+        """Where the gap to perfect foresight comes from, per size class (2027–2029 rules,
+        latest full price year): the same optimiser with less knowledge, and perfect
+        foresight with fewer freedoms."""
+        c = self.cheapest_dynamic()
+        if c is None or not getattr(self, "focus", None) or not self.head_years:
+            return None
+        scn, year = "nosal_min50", self.head_years[-1]
+        pers = self.periods(c, scn, [year])
         if not pers:
             return None
-        cap = self.conn.battery_cap_w(b.phases)
-        m = meta.get((b.id, c.id), {"windows": [], "wear": self.wear_for(b)[0]})
-        fit = self.head_years[-1] if self.head_years else ""
+        _, per, idx, _ = pers[-1]
+        net = per.imp - per.exp
+        u, s = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
+        rec = self.records
         fcfg = self.cfg.get("strategies", {}).get("forecast", {})
-        rows = [
-            ("self_consumption", "nothing: store surplus, use it when the house imports", "self_consumption", {}),
-            ("timed", f"fixed windows, chosen on {fit} prices (that year is in-sample)", "timed", {}),
-            ("dynamic", "today's day-ahead prices + yesterday's usage", "dynamic", {}),
-            ("dynamic_sell", "same, may sell to the grid", "dynamic_sell", {}),
-            ("forecast", "day-ahead prices until tomorrow night + usage/solar of the last days", "forecast", {}),
-            ("forecast, perfect usage forecast", "same optimiser, but knows the real usage and solar in advance",
-             "oracle", {}),
-            ("bound: solar only, no selling", "everything in advance; stores only solar, covers only own load",
-             "pf", {"grid_charge": False, "sell": False}),
-            ("bound: solar only, may sell", "everything in advance; stores only solar, may sell it",
-             "pf", {"grid_charge": False}),
-            ("bound: grid charging, no selling", "everything in advance; may charge from the grid, no selling",
-             "pf", {"sell": False}),
-            ("perfect_foresight", "everything in advance, all freedoms", "pf", {}),
-        ]
-        out = []
-        for name, knows, kind, kw in rows:
-            if kind == "timed" and not m["windows"]:
-                continue
-            row = {"strategy": name, "knows": knows}
-            vals, cyc = [], []
-            for label, per, idx, _ in pers:
-                net = per.imp - per.exp
-                if kind == "pf":
-                    u, s = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
-                    r = perfect_foresight(net, u, s, b, cap, 0.0, **kw)
+        out = {name: {"strategy": name, "knows": knows} for name, knows, _, _ in self.GAP_ROWS}
+        for f in self.focus:
+            b = f["b"]
+            cap = self.conn.battery_cap_w(b.phases)
+            m = meta.get((b.id, c.id), {"windows": [], "wear": self.wear_for(b)[0]})
+            mine = rec[(rec.battery_id == b.id) & (rec.contract_id == c.id) & (rec.scenario == scn)
+                       & (rec.price_year == year)].set_index("strategy").saving
+            for name, _, kind, kw in self.GAP_ROWS:
+                if kind == "rec":
+                    v = mine.get(name, np.nan)
                 elif kind == "oracle":
-                    u, s = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
                     r = simulate(net, plan_forecast(idx, net, u, s, b, cap, m["wear"], fcfg, forecast=net), b, cap)
+                    v = self.saving(r, per, c, scn)
                 else:
-                    r = self.sim_strategy(kind, b, cap, per, idx, c, scn, m["wear"], windows=m["windows"])
-                v = self.saving(r, per, c, scn)
-                row[f"eur_{label}"] = v
-                vals.append(v)
-                cyc.append(r.efc)
-            row["mean_eur"] = float(np.mean(vals))
-            row["cycles_per_year"] = float(np.mean(cyc))
-            out.append(row)
-        df = pd.DataFrame(out)
-        top = df.loc[df.strategy == "perfect_foresight", "mean_eur"]
-        if len(top):
-            df["gap_to_bound_eur"] = top.iloc[0] - df["mean_eur"]
+                    v = self.saving(perfect_foresight(net, u, s, b, cap, 0.0, **kw), per, c, scn)
+                out[name][f["cls"]] = v
+        df = pd.DataFrame(list(out.values()))
+        cls = [f["cls"] for f in self.focus]
+        df = df.dropna(subset=cls, how="all").reset_index(drop=True)
+        self.gap_year = year
         return df
 
-    @staticmethod
-    def gap_text(gap: pd.DataFrame) -> str:
-        v = dict(zip(gap.strategy, gap.mean_eur))
+    def gap_text(self, gap: pd.DataFrame) -> str:
+        ch = getattr(self, "chosen", None)
+        col = next((f["cls"] for f in self.focus if ch is not None and f["b"].id == ch.id), self.focus[0]["cls"])
+        v = dict(zip(gap.strategy, gap[col]))
         g = lambda k: v.get(k, float("nan"))  # noqa: E731
-        ycols = [c for c in gap.columns if c.startswith("eur_")]
-        lines = ["**Why perfect foresight earns so much more** (chosen battery, cheapest dynamic contract, "
-                 "2027–2029 rules). Each row adds or removes one piece of knowledge or freedom:",
-                 f"- *Timing alone* is the biggest piece: storing only solar and only covering the house, perfect "
-                 f"knowledge still earns €{g('bound: solar only, no selling'):,.0f} vs €{g('self_consumption'):,.0f} "
-                 "for self-consumption, with about the same number of cycles. It absorbs solar in the cheapest "
-                 "(often negative) export hours instead of first thing in the morning, and keeps the energy for "
-                 "the most expensive hours.",
-                 f"- *Selling stored solar* adds only €{g('bound: solar only, may sell') - g('bound: solar only, no selling'):,.0f} "
-                 "per year: the battery is almost empty by the next morning, so there is rarely energy left to sell "
-                 "on top of the evening and night use.",
-                 f"- *Grid charging* adds €{g('bound: grid charging, no selling') - g('bound: solar only, no selling'):,.0f}; "
-                 "perfect foresight ignores wear, so part of that would not pay off for real.",
-                 f"- With the real day-ahead prices but a **perfect usage and solar forecast**, the optimiser reaches "
-                 f"€{g('forecast, perfect usage forecast'):,.0f}; with yesterday-style forecasts (`forecast`) "
-                 f"€{g('forecast'):,.0f}. So the gap is mostly about predicting the household's own solar and "
-                 "usage, not about prices. A good solar forecast (e.g. Forecast.Solar or Solcast in Home "
-                 "Assistant) is what closes it."]
-        if "timed" in v and len(ycols) > 1:
-            row = gap[gap.strategy == "timed"].iloc[0]
-            dyn = gap[gap.strategy == "dynamic"].iloc[0]
-            wins = [c[4:] for c in ycols if row[c] > dyn[c]]
-            lines.append(f"- `timed` beats `dynamic` in {', '.join(wins) if wins else 'no year'}: its windows are "
-                         f"picked on {ycols[-1][4:]} prices, so that year is in-sample. Its grid charging also ignores "
-                         "the battery's wear, which `dynamic` requires every charge to earn back.")
+        sizes = ", ".join(f"{f['cls']} €{dict(zip(gap.strategy, gap[f['cls']])).get('forecast', float('nan')):,.0f}"
+                          for f in self.focus)
+        lines = [f"#### Why perfect foresight earns more ({col} battery, {self.gap_year} prices)",
+                 f"- **Timing** is the biggest piece: storing only solar and only covering the house, perfect "
+                 f"knowledge earns €{g('bound: solar only, no selling'):,.0f} vs €{g('self_consumption'):,.0f} "
+                 "for self-consumption: it absorbs solar in the cheapest (often negative) export hours and keeps "
+                 "it for the most expensive hours.",
+                 f"- **Selling stored solar** adds €{g('bound: solar only, may sell') - g('bound: solar only, no selling'):,.0f}; "
+                 f"**grid charging** adds €{g('bound: grid charging, no selling') - g('bound: solar only, no selling'):,.0f} "
+                 "(perfect foresight ignores wear).",
+                 f"- **Forecasting is the gap:** with a perfect usage/solar forecast the optimiser reaches "
+                 f"€{g('forecast, perfect usage forecast'):,.0f}; with last-days forecasts €{g('forecast'):,.0f}. "
+                 "A solar forecast (Forecast.Solar, Solcast) in Home Assistant closes much of it.",
+                 f"- **Bigger batteries gain more from `forecast`:** {sizes}."]
+        rec = self.records
+        if ch is not None:
+            t = rec[(rec.battery_id == ch.id) & (rec.scenario == "nosal_min50") & ~rec.partial
+                    & rec.price_year.isin(self.head_years)]
+            p = t.pivot_table(index="price_year", columns="strategy", values="saving", aggfunc="mean")
+            if {"timed", "dynamic"} <= set(p.columns):
+                wins = [str(y) for y in p.index if p.loc[y, "timed"] > p.loc[y, "dynamic"]]
+                lines.append(f"- **`timed` vs `dynamic`:** timed wins in {', '.join(wins) or 'no year'}; its windows "
+                             f"are picked on {self.head_years[-1]} prices (in-sample) and its grid charging ignores "
+                             "wear.")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------ 11.6 Objective 4
+    MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
     def step_kiln(self):
-        sec = Section("kiln", "9. Objective 4 – pottery kiln on free power")
+        sec = Section("kiln", "10. Pottery kiln on free power")
         k = dict(self.cfg.get("kiln", {}) or {})
         k.update(self.opts.kiln or {})
-        b = getattr(self, "chosen", None)
         powers = [float(p) for p in k.get("powers_kw", [1.5, 2.0, 3.0, 3.6])]
         one_phase = self.conn.phases == 1
         if one_phase:
             powers = [p for p in powers if p <= float(k.get("single_phase_max_kw", 3.68))]
         hours, duty = float(k.get("firing_hours", 8)), float(k.get("avg_duty", 0.7))
         starts, tol = [int(h) for h in k.get("start_hours", [7, 8, 9, 10])], float(k.get("free_tolerance", 0.05))
-        nb = extras.kiln_days(self.profile, None, 0, None, powers, hours, duty, starts, tol)
-        wb, soc_start, label = None, None, "with_battery"
-        if b is not None:
-            cap = self.conn.battery_cap_w(b.phases)
-            net = (self.profile["imp"] - self.profile["exp"]).values
-            r = simulate(net, SELF, b, cap, keep_trace=True)
-            soc_start = np.concatenate([[0.0], r.soc[:-1]])
-            wb = extras.kiln_days(self.profile, b, cap, soc_start, powers, hours, duty, starts, tol)
         price = self.avg_prices()[0]["nosal_min50"][0]
-        summ = extras.kiln_summary(nb, wb, price, label)
+        nb = extras.kiln_days(self.profile, None, 0, None, powers, hours, duty, starts, tol)
+        focus = getattr(self, "focus", None) or []
+        if not focus and getattr(self, "chosen", None) is not None:
+            focus = [{"cls": self.class_of(self.chosen)[0] or "battery", "color": self.CLASS_COLORS[0],
+                      "b": self.chosen}]
+        net = (self.profile["imp"] - self.profile["exp"]).values
+        per_cls = {}
+        for f in focus:
+            b = f["b"]
+            cap = self.conn.battery_cap_w(b.phases)
+            r = simulate(net, SELF, b, cap, keep_trace=True)
+            per_cls[f["cls"]] = extras.kiln_days(self.profile, b, cap, np.concatenate([[0.0], r.soc[:-1]]),
+                                                 powers, hours, duty, starts, tol)
+        rows = []
+        for p, g in nb.groupby("kiln_kw"):
+            row = {"kiln_kw": p, "firing_kwh": g.firing_kwh.iloc[0], "free_days_no_battery": int(g.free.sum())}
+            for cls, wb in per_cls.items():
+                row[f"free_days_{slug(cls)}"] = int(wb[wb.kiln_kw == p].free.sum())
+            row["avg_cost_per_firing_no_battery"] = g.grid_kwh.mean() * price
+            for cls, wb in per_cls.items():
+                row[f"avg_cost_per_firing_{slug(cls)}"] = wb[wb.kiln_kw == p].grid_kwh.mean() * price
+            rows.append(row)
+        summ = pd.DataFrame(rows)
         sec.tables["kiln_free_firing_days"] = summ.round(2)
-        if wb is not None and len(wb):
+        ch = getattr(self, "chosen", None)
+        ch_cls = next((f["cls"] for f in focus if ch is not None and f["b"].id == ch.id),
+                      focus[0]["cls"] if focus else None)
+        if ch_cls is not None:
+            wb = per_cls[ch_cls]
             by_month = wb[wb.free].groupby(["kiln_kw", "month"]).size().unstack(fill_value=0)
-            sec.tables["free_days_per_month_with_battery"] = by_month
-        md = [f"How many days per year a kiln can fire to maximum temperature on solar surplus"
-              f"{' plus the ' + b.name if b else ''}, with at most {tol:.0%} of the firing energy from the grid. "
-              f"Assumptions (config.yaml `kiln`, edit to your kiln's data sheet): a firing takes {hours:g} h and the "
-              f"kiln draws on average {duty:.0%} of its rated power, so a firing needs rated kW × {hours * duty:g} kWh. "
-              f"Start hour is chosen per day among {starts}. The battery starts each day at the charge it would have "
-              "had with normal self-consumption.",
-              f"- `avg_cost_per_firing` = grid energy × €{price:.3f}/kWh (average all-in import price, 2027 rules). "
-              "Surplus solar is not entirely free: from 2027 each kWh used instead of exported gives up about "
-              f"€{self.avg_prices()[0]['nosal_min50'][1]:.3f} of feed-in compensation.",
-              "- Kilns above 3.68 kW (16 A) need a three-phase (or dedicated 1-phase high-current) group; "
-              + ("those are left out on this single-phase connection." if one_phase else
-                 f"your {self.conn.label} connection allows them."),
-              "- One firing per day at most; the profile year uses the real meter data (synthetic October included)."]
+            by_month = by_month.reindex(columns=range(1, 13), fill_value=0)
+            by_month = by_month.loc[:, by_month.sum() > 0]
+            by_month.columns = [self.MONTHS[m - 1] for m in by_month.columns]
+            sec.tables[f"free_days_per_month_{slug(ch_cls)}"] = by_month
+        sec.interactive["kiln_days"] = {
+            "kind": "bars", "unit": "days", "yLabel": "free firing days per year",
+            "title": "Free firing days per year, by kiln power and battery size",
+            "subtitle": f"A firing needs rated kW × {hours * duty:g} kWh ({hours:g} h at {duty:.0%} average power) with at "
+                        f"most {tol:.0%} from the grid; one firing per day.",
+            "categories": [f"{p:g} kW" for p in summ.kiln_kw],
+            "series": [{"label": "No battery", "color": "#a3a29d", "values": summ.free_days_no_battery.tolist()}]
+                      + [{"label": f"{f['cls']}: {self.short_name(f['b'])}", "color": f["color"],
+                          "values": summ[f"free_days_{slug(f['cls'])}"].tolist()} for f in focus]}
+        best = summ[summ.filter(like="free_days_").max(axis=1) > 0]
+        md = ["`firing energy = kiln kW × firing hours × average power share`",
+              "`free day` = the whole firing runs on solar surplus (plus the battery) with at most "
+              f"{tol:.0%} from the grid",
+              f"`cost per firing = grid kWh × €{price:.3f}` (average all-in import price, 2027 rules)"]
+        if len(best):
+            last = best.iloc[-1]
+            parts = [f"no battery {int(last.free_days_no_battery)}"]
+            for f in focus:
+                parts.append(f"{f['cls']} {int(last['free_days_' + slug(f['cls'])])}")
+            md.append(f"- Largest kiln with free days: **{last.kiln_kw:g} kW** – {', '.join(parts)} days a year.")
+        md += ["#### Assumptions",
+               f"- A firing to maximum temperature takes {hours:g} h at {duty:.0%} of rated power on average "
+               "(config.yaml `kiln`; edit to your kiln's data sheet). Start hour chosen per day among "
+               f"{starts}.",
+               "- The battery starts each day at the charge it would have had with normal self-consumption.",
+               f"- Solar used for the kiln is not entirely free: from 2027 each kWh gives up about "
+               f"€{self.avg_prices()[0]['nosal_min50'][1]:.3f} of feed-in compensation.",
+               "- Kilns above 3.68 kW (16 A) need a three-phase or dedicated high-current group; "
+               + ("left out on this single-phase connection." if one_phase else
+                  f"your {self.conn.label} connection allows them.")]
         sec.md = "\n".join(md)
-        f = self.fig(charts.kiln_days, summ, b.name if b else None, label)
-        if f:
-            sec.figures["kiln_free_days"] = f
         self.emit(sec)
 
     # ------------------------------------------------------------------ advice (shown first)
@@ -1258,118 +1547,81 @@ class Analysis:
             self.emit(sec)
             return
         adv = self.advice_contract()
-        h = rk[(rk.analysis == "headline") & (rk.price_variant == "NL current") & (rk.strategy != "perfect_foresight")]
-        if adv is not None and (h._cid == adv.id).any():
-            h = h[h._cid == adv.id]
-        ranked = h.sort_values("payback_years").drop_duplicates("_bid")
+        ranked = self.achievable_ranked(rk)
         rec = self.records
+        net = (self.profile["imp"] - self.profile["exp"]).values
 
         def describe(r):
-            b = next(x for x in self.batteries if x.id == r["_bid"])
-            cap = self.conn.battery_cap_w(b.phases)
-            net = (self.profile["imp"] - self.profile["exp"]).values
-            sim = simulate(net, SELF, b, cap, keep_trace=True)
+            b = self.battery(r["_bid"])
+            sim = simulate(net, SELF, b, self.conn.battery_cap_w(b.phases), keep_trace=True)
             daily = extras.daily_battery(self.profile.index, net, sim.batt_ac, sim.soc, b.usable_kwh,
                                          (b.standby_w or 0) / 4000.0)
-            sv = rec[(rec.battery_id == b.id) & (rec.contract_id == r["_cid"]) & (rec.strategy == r["strategy"])]
-            sv27 = sv[(sv.scenario == "nosal_min50") & ~sv.partial
-                      & sv.price_year.isin(["profile"] + list(self.head_years))]
             surplus = daily.solar_surplus_kwh.sum()
-            return {"battery": b.name, "price_eur": r["price_eur"], "eur_per_kwh_usable": r["eur_per_kwh_usable"],
-                    "usable_kwh": b.usable_kwh, "contract": r["contract"], "strategy": r["strategy"],
-                    "saving_eur_year_2027": sv27.saving.mean() if len(sv27) else np.nan,
+            return {"size_class": self.class_of(b)[0] or "other", "battery": b.name, "price_eur": r["price_eur"],
+                    "eur_per_kwh_usable": r["eur_per_kwh_usable"], "usable_kwh": b.usable_kwh,
+                    "contract": r["contract"], "strategy": r["strategy"], "saving_eur_year_2027": r["_saving27"],
                     "payback_years": r["payback_years"], "npv_eur": r["npv_eur"],
                     "days_full": int(daily.full.sum()),
                     "days_below_half": int((daily.max_soc_kwh < 0.5 * b.usable_kwh).sum()),
                     "share_of_surplus_stored": daily.charged_from_solar_kwh.sum() / surplus if surplus else np.nan,
-                    "_bid": b.id, "_cid": r["_cid"], "_model": re.sub(r"\s*\(.*\)$", "", b.name)}
+                    "_bid": b.id, "_cid": r["_cid"], "_model": self.short_name(b)}
 
-        top = ranked.head(6).to_dict("records")
-        comp = pd.DataFrame([describe(r) for r in top])
-        chosen_fixed = self.opts.chosen_battery or self.cfg.get("chosen_battery")
-        b = self.chosen if chosen_fixed else next(x for x in self.batteries if x.id == comp.iloc[0]["_bid"])
-        self.chosen = b
-        if not (comp._bid == b.id).any():
-            r = ranked[ranked._bid == b.id]
-            if len(r):
-                comp = pd.concat([pd.DataFrame([describe(r.iloc[0].to_dict())]), comp], ignore_index=True)
-        row = comp[comp._bid == b.id].iloc[0] if (comp._bid == b.id).any() else comp.iloc[0]
-        # a clearly bigger battery, even if it is not in the top 6
-        big = ranked[ranked.usable_kwh > row.usable_kwh * 1.6]
-        bigger = describe(big.iloc[0].to_dict()) if len(big) else None
-        if bigger is not None and not (comp._bid == bigger["_bid"]).any():
-            comp = pd.concat([comp, pd.DataFrame([bigger])], ignore_index=True)
-        sec.tables["battery_comparison"] = comp.round(2)
-        classes = self.size_class_table(ranked, describe)
+        b = self.chosen
+        brow = ranked[ranked._bid == b.id]
+        row = pd.Series(describe((brow if len(brow) else ranked).iloc[0].to_dict()))
+        classes = self.size_class_table(describe)
         if classes is not None:
             sec.tables["best_per_size_class"] = classes.round(2)
+        comp = pd.DataFrame([describe(r) for r in ranked.head(6).to_dict("records")])
+        sec.tables["battery_comparison"] = comp.round(2)
         sec.summary = (f"Best choice: {b.name}" + (f" on {adv.label}" if adv is not None else "")
                        + f" – pays back in {row.payback_years:.1f} years, saves about "
                        f"€{row.saving_eur_year_2027:,.0f} a year from 2027.")
-        md = [f"### Best choice: **{b.name}**" + (f" on **{adv.label}**" if adv is not None else ""), ""]
-        md.append(f"- **Pays back fastest:** {row.payback_years:.1f} years at €{row.price_eur:,.0f} "
-                  f"(€{row.eur_per_kwh_usable:,.0f} per usable kWh), net present value €{row.npv_eur:,.0f} over its life.")
-        md.append(f"- **Saves about €{row.saving_eur_year_2027:,.0f} per year** from 2027 with strategy "
-                  f"`{row.strategy}` on {row.contract}.")
+        md = [f"### Recommendation: **{b.name}**" + (f" on **{adv.label}**" if adv is not None else ""),
+              f"`payback {row.payback_years:.1f} years · saves €{row.saving_eur_year_2027:,.0f}/year from 2027 · "
+              f"price €{row.price_eur:,.0f} (€{row.eur_per_kwh_usable:,.0f} per usable kWh) · net present value "
+              f"€{row.npv_eur:,.0f}`"]
         if row.strategy in ("dynamic", "dynamic_sell", "forecast", "timed"):
             simple = rec[(rec.battery_id == b.id) & (rec.contract_id == row._cid) & (rec.scenario == "nosal_min50")
                          & ~rec.partial & rec.price_year.isin(["profile"] + list(self.head_years))
                          & rec.strategy.isin(["self_consumption", "hbc_pv_first"])]
+            alt = ""
             if len(simple):
                 ss = simple.groupby("strategy").saving.mean().sort_values(ascending=False)
-                md[-1] += (f" `{row.strategy}` needs custom control (see section 7); with plain `{ss.index[0]}`, "
-                           f"which the battery's own app or Home Battery Control can do as-is, it saves "
-                           f"€{ss.iloc[0]:,.0f} per year.")
-        md.append(f"- **Its size fits your surplus:** it fills completely on {row.days_full} days a year and stores "
-                  f"{row.share_of_surplus_stored:.0%} of your solar surplus. In winter it stays below half full on "
-                  f"{row.days_below_half} days, so a bigger battery would mainly add capacity that sits idle.")
-        if bigger is not None:
-            extra = bigger["saving_eur_year_2027"] - row.saving_eur_year_2027
-            md.append(f"- **Why not bigger?** {bigger['battery']} ({bigger['usable_kwh']:.1f} kWh usable) saves only "
-                      f"€{extra:,.0f} more per year for €{bigger['price_eur'] - row.price_eur:,.0f} more, so it pays back "
-                      f"in {bigger['payback_years']:.1f} years.")
-        others = comp[(comp._model != row._model)]
-        if len(others):
-            o = others.iloc[0]
-            md.append(f"- **Runner-up:** {o.battery}, {o.payback_years:.1f} years "
-                      f"(€{o.eur_per_kwh_usable:,.0f} per usable kWh).")
-        if classes is not None and len(classes) > 1:
-            md.append(self.size_class_text(classes))
+                alt = (f" Without it, plain `{ss.index[0]}` (battery app or Home Battery Control as-is) saves "
+                       f"€{ss.iloc[0]:,.0f} a year.")
+            md.append(f"- **Control:** strategy `{row.strategy}` needs custom control (section 7).{alt}")
+        md.append(f"- **Fit:** full on {row.days_full} days a year, stores {row.share_of_surplus_stored:.0%} of your "
+                  f"solar surplus; below half full on {row.days_below_half} (winter) days.")
         combo = self.combination_table(b)
         if combo is not None:
             sec.tables["contract_and_battery_combinations"] = combo
             best_c = combo.iloc[combo.yearly_cost_eur_2027.idxmin()]
-            md.append(f"- **Cheapest combination from 2027:** {best_c.option} – about €{best_c.yearly_cost_eur_2027:,.0f} "
-                      f"a year, €{combo.iloc[0].yearly_cost_eur_2027 - best_c.yearly_cost_eur_2027:,.0f} less than "
-                      "today's situation (see the combination table).")
-        dyn = adv if (adv is not None and adv.is_dynamic) else None
-        md.append("")
-        md.append("The table compares the top batteries; the two charts below show, for the recommended battery, how "
-                  "much solar surplus there is each day and how much of it the battery stores, and what it saves each day.")
-        sec.md = "\n".join(md)
-        self.advice_charts(sec, b, dyn)
+            md.append(f"- **Cheapest combination from 2027:** {best_c.option}, about "
+                      f"€{best_c.yearly_cost_eur_2027:,.0f} a year (today: €{combo.iloc[0].yearly_cost_eur_2027:,.0f}).")
+        if classes is not None and len(classes) > 1:
+            md.append(self.size_class_text(classes))
+        others = comp[comp._model != self.short_name(b)]
+        if len(others):
+            o = others.iloc[0]
+            md += ["#### Runner-up of another model",
+                   f"- {o.battery}: {o.payback_years:.1f} years payback, €{o.eur_per_kwh_usable:,.0f} per usable kWh."]
+        self.advice_charts(sec, adv)
+        sec.md = "\n".join(md) + sec.md
         self.emit(sec)
 
-    def size_class_table(self, ranked: pd.DataFrame, describe) -> pd.DataFrame | None:
-        """Best-value battery (fastest payback) per capacity class, e.g. 5/10/15 kWh ± 2.5,
-        with what the step up from the previous class adds."""
-        a = self.cfg.get("analysis", {})
-        centres = a.get("size_classes_kwh", [5, 10, 15])
-        half = float(a.get("size_class_halfwidth_kwh", 2.5))
-        size = {b.id: (b.nominal_kwh or b.usable_kwh) for b in self.batteries}
+    def size_class_table(self, describe) -> pd.DataFrame | None:
+        """The best-value battery per size class (see pick_focus) and what stepping up
+        from the next smaller class adds."""
         rows, prev = [], None
-        for cen in centres:
-            sel = ranked[ranked._bid.map(size).between(cen - half, cen + half, inclusive="left")]
-            if sel.empty:
-                continue
-            r = sel.iloc[0].to_dict()
-            d = describe(r)
-            row = {"size_class": f"{cen:g} kWh (±{half:g})", "battery": d["battery"],
-                   "nominal_kwh": size[r["_bid"]], "usable_kwh": d["usable_kwh"], "price_eur": d["price_eur"],
+        for f in getattr(self, "focus", []) or []:
+            d = describe(f["row"].to_dict())
+            row = {"size_class": f["cls"], "battery": d["battery"], "nominal_kwh": self.size_of(f["b"]),
+                   "usable_kwh": d["usable_kwh"], "price_eur": d["price_eur"],
                    "eur_per_kwh_usable": d["eur_per_kwh_usable"], "strategy": d["strategy"],
                    "saving_eur_year_2027": d["saving_eur_year_2027"], "payback_years": d["payback_years"],
-                   "npv_eur": d["npv_eur"], "lifetime_net_saving_eur": r.get("lifetime_net_saving_eur", np.nan),
-                   "candidates": len(sel), "days_full": d["days_full"]}
+                   "npv_eur": d["npv_eur"], "lifetime_net_saving_eur": f["row"].get("lifetime_net_saving_eur", np.nan),
+                   "days_full": d["days_full"]}
             if prev is not None:
                 ds = row["saving_eur_year_2027"] - prev["saving_eur_year_2027"]
                 dp = row["price_eur"] - prev["price_eur"]
@@ -1384,22 +1636,22 @@ class Analysis:
     def size_class_text(classes: pd.DataFrame) -> str:
         best_npv = classes.loc[classes.npv_eur.idxmax()]
         fastest = classes.loc[classes.payback_years.idxmin()]
-        lines = ["", "**Which size?** The best-value battery per size class (fastest payback within the class):"]
+        lines = ["", "### Which size?",
+                 "`payback of the extra = extra price ÷ extra saving per year` (stepping up one size class)"]
         for r in classes.itertuples():
-            s = (f"- **{r.size_class}:** {r.battery}, €{r.price_eur:,.0f}, saves €{r.saving_eur_year_2027:,.0f}/yr "
-                 f"with `{r.strategy}`, pays back in {r.payback_years:.1f} years, net present value €{r.npv_eur:,.0f}")
+            s = (f"- **{r.size_class}:** {r.battery} – €{r.price_eur:,.0f}, €{r.saving_eur_year_2027:,.0f}/yr "
+                 f"(`{r.strategy}`), payback {r.payback_years:.1f} yr, NPV €{r.npv_eur:,.0f}")
             extra = getattr(r, "extra_saving_vs_smaller", np.nan)
             if isinstance(extra, float) and not np.isnan(extra):
                 pe = r.payback_of_extra_years
-                s += (f"; the step up adds €{extra:,.0f}/yr for €{r.extra_price_vs_smaller:,.0f} more"
-                      + (f" (that extra pays back in {pe:.1f} years)" if np.isfinite(pe) else " (never pays back)"))
-            lines.append(s + ".")
+                s += (f"; the extra €{r.extra_price_vs_smaller:,.0f} earns €{extra:,.0f}/yr"
+                      + (f" → {pe:.1f} yr" if np.isfinite(pe) else " → never"))
+            lines.append(s)
         if best_npv.size_class == fastest.size_class:
-            lines.append(f"- The {fastest.size_class} class wins on both payback and lifetime value.")
+            lines.append(f"- **{fastest.size_class}** wins on both payback and lifetime value.")
         else:
-            lines.append(f"- Fastest payback: {fastest.size_class}; most money over the battery's life (net present "
-                         f"value): {best_npv.size_class}. Pick the larger one only if you are happy to wait longer "
-                         "for the money back.")
+            lines.append(f"- Fastest payback: **{fastest.size_class}**; most money over its life: "
+                         f"**{best_npv.size_class}** – pick it if you accept a longer wait.")
         return "\n".join(lines)
 
     def advice_contract(self):
@@ -1426,61 +1678,62 @@ class Analysis:
                              "battery_saving_eur": best.iloc[0], "strategy": best.index[0]})
         return pd.DataFrame(rows).round(0) if rows else None
 
-    def advice_charts(self, sec, b, dyn):
-        cap = self.conn.battery_cap_w(b.phases)
-        scn = "nosal_min50"
-        c = dyn or self.current or (self.contracts[0] if self.contracts else None)
-        if c is None:
+    def advice_charts(self, sec, c):
+        """Per size class: day-by-day storage and saving in the latest full price year."""
+        c = c or self.current or (self.contracts[0] if self.contracts else None)
+        focus = getattr(self, "focus", None) or []
+        if c is None or not focus:
             return
-        rk = self.payback_summary["ranked"]
-        h = rk[(rk._bid == b.id) & (rk._cid == c.id) & (rk.analysis == "headline")
-               & (rk.price_variant == "NL current") & (rk.strategy != "perfect_foresight")]
-        strat = h.sort_values("payback_years").iloc[0]["strategy"] if len(h) else "self_consumption"
+        scn = "nosal_min50"
         year = self.head_years[-1] if (c.is_dynamic and self.head_years) else "profile"
         pers = self.periods(c, scn, [year] if c.is_dynamic else None)
         if not pers:
             return
         _, per, idx, _ = pers[-1]
-        wear = self.wear_for(b)[0]
-        m = getattr(self, "_meta", {}).get((b.id, c.id), {})
-        r = self.sim_strategy(strat, b, cap, per, idx, c, scn, wear, windows=m.get("windows"), keep_trace=True)
         net = per.imp - per.exp
         u, s_ = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
-        per_q = (per.imp - r.imp) * u - (per.exp - r.exp) * s_
-        saving = pd.Series(per_q, index=idx).groupby(idx.date).sum()
-        saving.index = pd.to_datetime(saving.index)
-        soc = r.soc if r.soc is not None else np.zeros(len(net))
-        daily = extras.daily_battery(idx, net, r.batt_ac, soc, b.usable_kwh, (b.standby_w or 0) / 4000.0)
         label = f"{year} prices" if year != "profile" else "your profile year"
+        cum, overview, notes = [], [], []
+        dx = None
+        for f in focus:
+            b, strat = f["b"], f["strategy"]
+            cap = self.conn.battery_cap_w(b.phases)
+            m = getattr(self, "_meta", {}).get((b.id, c.id), {})
+            r = self.sim_strategy(strat, b, cap, per, idx, c, scn, self.wear_for(b)[0], windows=m.get("windows"),
+                                  keep_trace=True)
+            saving = pd.Series((per.imp - r.imp) * u - (per.exp - r.exp) * s_, index=idx).groupby(idx.date).sum()
+            saving.index = pd.to_datetime(saving.index)
+            soc = r.soc if r.soc is not None else np.zeros(len(net))
+            daily = extras.daily_battery(idx, net, r.batt_ac, soc, b.usable_kwh, (b.standby_w or 0) / 4000.0)
+            overview.append(daily.assign(saving_eur=saving.values, size_class=f["cls"], battery=b.name)
+                            .reset_index(names="date"))
+            dx = extras.ts(pd.DatetimeIndex(daily.index).tz_localize("Europe/Amsterdam"))
+            cum.append(extras.series(f"{f['cls']}: {b.name} ({strat})", saving.cumsum().values, f["color"], width=2))
+            notes.append(f"- **{f['cls']}:** €{saving.sum():,.0f} that year; best day €{saving.max():,.2f}; "
+                         f"{int((saving <= 0.01).sum())} days with (almost) no saving.")
+            sec.interactive[f"daily_saving_{f['cls']}"] = {
+                "title": f"{f['cls']}: {b.name} – saving per day ({label}, strategy {strat})",
+                "y": "€ per day", "daily": True, "height": 260, "x": dx,
+                "group": "Saving per day, per size class",
+                "series": [extras.series("Saving that day (€)", saving.values, f["color"], "bar")]}
+            sec.interactive[f"daily_charge_{f['cls']}"] = {
+                "title": f"{f['cls']}: {b.name} – solar surplus, storage and grid import per day ({label})",
+                "y": "kWh per day", "daily": True, "height": 320, "x": dx,
+                "group": "Solar surplus and storage per day, per size class",
+                "series": [extras.series("Solar surplus (kWh)", daily.solar_surplus_kwh, "#eda100", "bar"),
+                           extras.series("Stored from solar (kWh)", daily.charged_from_solar_kwh, "#1baf7a", "bar"),
+                           extras.series("Charged from grid (kWh)", daily.charged_from_grid_kwh, "#e87ba4", "bar"),
+                           extras.series("Grid import without battery (kWh)", daily.import_before_kwh, "#52514e"),
+                           extras.series("Grid import with battery (kWh)", daily.import_after_kwh, "#2a78d6"),
+                           extras.series(f"Usable capacity ({b.usable_kwh:.1f} kWh)", [b.usable_kwh] * len(daily),
+                                         "#4a3aa7", dash=[6, 4])]}
+        sec.interactive = {"cumulative_saving_year": {
+            "title": f"Cumulative saving through the year, per size class ({label}, 2027–2029 rules, {c.label})",
+            "y": "€ cumulative", "daily": True, "height": 320, "x": dx, "series": cum}, **sec.interactive}
         sec.csv_only.add("daily_overview")
-        sec.tables["daily_overview"] = daily.assign(saving_eur=saving.values).reset_index(names="date").assign(
-            date=lambda d: d.date.dt.strftime("%Y-%m-%d")).round(2)
-        f = self.fig(charts.daily_charge, daily, b.usable_kwh, f"{b.name}: solar surplus and storage per day")
-        if f:
-            sec.figures["daily_charge"] = f
-        dx = extras.ts(pd.DatetimeIndex(daily.index).tz_localize("Europe/Amsterdam"))
-        sec.interactive["daily_charge"] = {
-            "title": f"{b.name} – per day: solar surplus, stored energy and grid import ({label}, 2027 rules)",
-            "y": "kWh per day", "daily": True, "height": 340, "x": dx,
-            "series": [extras.series("Solar surplus (kWh)", daily.solar_surplus_kwh, "#e9b44c", "bar"),
-                       extras.series("Stored from solar (kWh)", daily.charged_from_solar_kwh, "#81b29a", "bar"),
-                       extras.series("Charged from grid (kWh)", daily.charged_from_grid_kwh, "#9c6644", "bar"),
-                       extras.series("Grid import without battery (kWh)", daily.import_before_kwh, "#3d405b"),
-                       extras.series("Grid import with battery (kWh)", daily.import_after_kwh, "#e07a5f"),
-                       extras.series(f"Usable capacity ({b.usable_kwh:.1f} kWh)", [b.usable_kwh] * len(daily),
-                                     "#2a6f97", dash=[6, 4])]}
-        f = self.fig(charts.daily_savings, saving, f"{b.name} with {c.label}: saving per day ({label}, 2027 rules)")
-        if f:
-            sec.figures["daily_savings"] = f
-        sec.interactive["daily_savings"] = {
-            "title": f"{b.name} with {c.label} – saving per day ({label}, 2027–2029 rules, strategy {strat})",
-            "y": "€ per day", "y2": "€ cumulative", "daily": True, "height": 320,
-            "x": extras.ts(pd.DatetimeIndex(saving.index).tz_localize("Europe/Amsterdam")),
-            "series": [extras.series("Saving that day (€)", saving.values, "#81b29a", "bar"),
-                       extras.series("Cumulative saving (€)", saving.cumsum().values, "#2a6f97", scale="y2", width=2)]}
-        sec.md += (f"\n\nDaily charts: {b.name} on {c.label}, strategy `{strat}`, {label} under the 2027–2029 rules. "
-                   f"Total saving that year: €{saving.sum():,.0f}; best day €{saving.max():,.2f}, "
-                   f"{int((saving <= 0.01).sum())} days with (almost) no saving.")
+        sec.tables["daily_overview"] = pd.concat(overview, ignore_index=True).assign(
+            date=lambda d: pd.to_datetime(d.date).dt.strftime("%Y-%m-%d")).round(2)
+        sec.md = "\n" + "\n".join(["#### Day by day in " + label + " (charts below)"] + notes)
 
     def bname(self, bid):
         return next((b.name for b in self.batteries if b.id == bid), bid)
@@ -1533,7 +1786,8 @@ class Analysis:
                                    "npv_eur": pb["npv"], "lifetime_net_saving_eur": pb["lifetime_net"],
                                    "efc_per_year": efc, "end_of_life_year": pb["eol_year"],
                                    "life_limit": pb["limit"], "estimated": "yes" if b.estimated else "",
-                                   "_bid": bid, "_cid": cid})
+                                   "_bid": bid, "_cid": cid, "_path": pb["path"],
+                                   "_saving27": by_scn.get("nosal_min50", np.nan)})
         rk = pd.DataFrame(ranked)
         if len(rk):
             rk = rk.sort_values(["analysis", "payback_years"], ascending=[False, True]).reset_index(drop=True)
@@ -1577,6 +1831,8 @@ class Analysis:
                 return None
             top = sv[sv.analysis == "headline"].sort_values(col[0], ascending=False).drop_duplicates("battery").head(3)
             combos = [(r.battery, r.contract, r.strategy) for r in top.itertuples()]
+        elif getattr(self, "focus", None):
+            combos = [(f["b"].name, f["c"].label, f["strategy"]) for f in self.focus]
         else:
             top = rk[rk.analysis == "headline"].drop_duplicates(["_bid"]).head(3)
             combos = [(self.bname(r["_bid"]), self.cname(r["_cid"]), r["strategy"]) for r in top.to_dict("records")]
@@ -1597,20 +1853,6 @@ class Analysis:
                 rows.append({"battery": bname, "contract": cname, "strategy": strat, "variant": vname,
                              "saving_eur_year_2027_rules": np.mean(vals)})
         return pd.DataFrame(rows) if rows else None
-
-    def savings_year_chart(self, rec):
-        if rec.empty or self.prices is None:
-            return None
-        dyn = rec[rec.price_year.apply(lambda x: isinstance(x, (int, np.integer))) & (rec.scenario == "nosal_min50")]
-        if dyn.empty:
-            return None
-        best = dyn.groupby(["battery_id", "contract_id", "strategy"])["saving"].mean().reset_index()
-        best = best.sort_values("saving", ascending=False).drop_duplicates("battery_id").head(3)
-        series = {}
-        for r in best.itertuples():
-            s = dyn[(dyn.battery_id == r.battery_id) & (dyn.contract_id == r.contract_id) & (dyn.strategy == r.strategy)]
-            series[f"{self.bname(r.battery_id)} – {r.strategy}"] = s.set_index("price_year")["saving"].sort_index()
-        return self.fig(charts.savings_years, series, "Yearly savings per price year (2027–2029 rules)")
 
 
 def payback(price: float, savings_by_scn: dict, efc_per_year: float, delivered_kwh_year: float,
@@ -1635,6 +1877,7 @@ def payback(price: float, savings_by_scn: dict, efc_per_year: float, delivered_k
     cum, npv, t = 0.0, 0.0, 0.0
     pay = math.inf
     year = start.year
+    path = [(0.0, -price)]           # (years since purchase, cumulative saving − price)
     first_frac = (pd.Timestamp(year=year + 1, month=1, day=1) - start).days / 365.0
     while t < life_years - 1e-9:
         frac = first_frac if t == 0 else 1.0
@@ -1652,5 +1895,6 @@ def payback(price: float, savings_by_scn: dict, efc_per_year: float, delivered_k
         npv += gain / (1 + r) ** (t + frac / 2)
         t += frac
         year += 1
-    return {"payback_years": pay, "npv": npv - price, "lifetime_net": cum - price,
+        path.append((t, cum - price))
+    return {"payback_years": pay, "npv": npv - price, "lifetime_net": cum - price, "path": path,
             "eol_year": f"{start.year + (start.dayofyear / 365.0) + life_years:.1f}", "limit": limit}

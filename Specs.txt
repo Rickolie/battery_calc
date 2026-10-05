@@ -511,3 +511,23 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - The section title shows its key finding; a table title shows a one-line finding (`battery_calc/summaries.py`). The Markdown report prints the same findings in italics.
   - Expand all / Collapse all buttons; a link in the contents list opens its section.
   - Zoomable charts are drawn when their section is opened.
+
+### 11.12 Size classes throughout, clearer charts and a shorter report (2026-10-05)
+
+- **Three size classes everywhere.** After the payback step, the fastest-payback battery of each size class (5 / 10 / 15 kWh ± 2.5, on the advice contract, achievable strategies) is followed through every later section; a fixed `chosen_battery` replaces its own class's winner. Each class keeps its colour in every chart.
+  - **Payback (7):**
+    - payback-vs-size scatter (one dot per battery, class winners labelled, hover for price, saving and NPV);
+    - cumulative-return chart (every battery from −price on the purchase date, adding each year's saving with capacity fade, crossing zero in the payback year; class winners coloured, the rest grey);
+    - yearly saving per price year for the three classes;
+    - average full-year earnings per strategy per class: stacked gains/costs with the net saving, the partial purchase year (2026) and the partial last year excluded, shared y-axis;
+    - gap-to-perfect-foresight table with one column per class;
+    - sensitivity table for the three classes.
+  - **Break-even (6 / 8):** interactive break-even vs charge price lines: the lowest-wear battery per class in 6, the class winners in 8.
+  - **Sanity check (9):** one table and one state-of-charge chart for the three classes; house and battery power for the recommended battery.
+  - **Kiln (10):** free firing days and cost per firing per class, a grouped bar chart, and free days per month with month names.
+  - **Advice:** the size-class table, cumulative saving through the year for the three classes, and daily saving / daily storage charts per class (collapsible).
+  - **Other tables:** a `size_class` column in the battery list and the Black Friday table (grouped by class).
+- **Charts:** small SVG charts (bars, scatter, lines) with hover tooltips, legends and selective labels, next to uPlot for the 15-minute series. No chart uses two y-axes. Colours are the validated categorical slots 1–3 for the classes and 1–5 for the earnings parts. Charts in closed blocks are drawn when opened.
+- **Report structure:**
+  - Sections are numbered in reading order: Advice; 1 Your data; 2 Power profile; 3 Current contract; 4 Cheapest contract without a battery; 5 Battery options; 6 Break-even; 7 Payback; 8 Break-even with simulated cycles; 9 Battery over the year; 10 Pottery kiln.
+  - Each section opens with formulas and a few key lines; longer explanations sit in collapsible `####` blocks.

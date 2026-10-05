@@ -153,10 +153,26 @@ def _earnings(df):
 
 
 def _gap(df):
-    v = dict(zip(df.strategy, df.mean_eur))
-    return (f"Perfect foresight {_e(v.get('perfect_foresight', np.nan))}/yr vs {_e(v.get('forecast', np.nan))} for the "
-            f"forecast optimiser and {_e(v.get('self_consumption', np.nan))} for self-consumption; most of the gap is "
-            "forecasting your own solar and usage.")
+    cls = [c for c in df.columns if c.endswith(" kWh")]
+    v = df.set_index("strategy")
+    parts = [f"{c}: forecast {_e(v.loc['forecast', c])} vs perfect {_e(v.loc['perfect_foresight', c])}"
+             for c in cls if "forecast" in v.index and "perfect_foresight" in v.index]
+    return "Per size class – " + "; ".join(parts) + ". Most of the gap is forecasting your own solar and usage."
+
+
+def _earn_avg(df):
+    parts = []
+    for cls, g in df.groupby("size_class", sort=False):
+        g = g[g.strategy != "perfect_foresight"]
+        r = g.loc[g.net_saving.idxmax()]
+        parts.append(f"{cls}: {r.strategy} {_e(r.net_saving)}")
+    return "Best net saving in an average full year – " + "; ".join(parts) + "."
+
+
+def _sanity(df):
+    ok = df.balance_error_kwh.max() < 1e-6
+    parts = [f"{r.size_class} full on {int(r.days_full)} days" for r in df.itertuples()]
+    return ("Energy balance closes" if ok else "Energy balance error!") + "; " + ", ".join(parts) + "."
 
 
 def _comparison(df):
@@ -180,12 +196,13 @@ def _combos(df):
 
 
 def _kiln(df):
-    d = df[df.free_days_with_battery > 0]
+    cols = [c for c in df.columns if c.startswith("free_days_")]
+    d = df[df[cols].max(axis=1) > 0]
     if d.empty:
         return "No kiln size fires on free power alone."
     r = d.iloc[-1]
-    return (f"Largest kiln with free days: {r.kiln_kw:g} kW ({int(r.free_days_with_battery)} days with battery, "
-            f"{int(r.free_days_no_battery)} without).")
+    parts = [f"{c.replace('free_days_', '').replace('_kwh', ' kWh').replace('_', ' ')} {int(r[c])}" for c in cols]
+    return f"Largest kiln with free days: {r.kiln_kw:g} kW (" + ", ".join(parts) + " days)."
 
 
 def _kiln_month(df):
@@ -214,8 +231,10 @@ RULES = [
     (r"dynamic_breakeven_scale", _scale),
     (r"^sensitivity$", _sensitivity),
     (r"black_friday", _blackfriday),
-    (r"earnings_per_year", _earnings),
+    (r"earnings_per_(year|ownership_year)", _earnings),
     (r"gap_to_perfect_foresight", _gap),
+    (r"earnings_average_full_year", _earn_avg),
+    (r"self_consumption_check", _sanity),
     (r"battery_comparison", _comparison),
     (r"best_per_size_class", _size_class),
     (r"contract_and_battery_combinations", _combos),
