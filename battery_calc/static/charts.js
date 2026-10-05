@@ -67,8 +67,8 @@
     if (hi === lo) { hi = lo + 1; }
     const raw = (hi - lo) / (n || 5), mag = Math.pow(10, Math.floor(Math.log10(raw)));
     const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
-    const out = [];
-    for (let v = Math.floor(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(+v.toFixed(10));
+    const out = [], end = Math.ceil(hi / step - 1e-9) * step;
+    for (let v = Math.floor(lo / step + 1e-9) * step; v <= end + step * 1e-9; v += step) out.push(+v.toFixed(10));
     return out;
   }
   function money(v, unit) {
@@ -137,10 +137,13 @@
     }
   }
   function axes(svg, W, H, m, ys, yScale, yLabel, unit) {
+    const step = ys.length > 1 ? Math.abs(ys[1] - ys[0]) : 1;
+    const dec = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
     for (const v of ys) {
       const y = yScale(v);
       el("line", { x1: m.l, x2: W - m.r, y1: y, y2: y, stroke: v === 0 ? MUTED : GRID, "stroke-width": 1 }, svg);
-      txt(svg, m.l - 6, y + 4, money(v, unit), { "text-anchor": "end" });
+      const n = v.toLocaleString("nl-NL", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+      txt(svg, m.l - 6, y + 4, unit === "€" ? "€" + n : unit === "yr" ? n + " yr" : n, { "text-anchor": "end" });
     }
     if (yLabel) txt(svg, 12, m.t + (H - m.t - m.b) / 2, yLabel,
       { transform: `rotate(-90 12 ${m.t + (H - m.t - m.b) / 2})`, "text-anchor": "middle" });
@@ -220,9 +223,9 @@
     const svg = el("svg", { width: W, height: H, role: "img" }, div);
     const m = { l: 56, r: 16, t: 14, b: 40 };
     const P = spec.points;
-    const xs = niceTicks(0, Math.max(...P.map((p) => p.x)) * 1.05, 6);
+    const xs = niceTicks(0, Math.max(...P.map((p) => p.x)), 6);
     const yv = P.map((p) => p.y).filter((v) => isFinite(v));
-    const ys = niceTicks(0, Math.max(...yv) * 1.05, 5);
+    const ys = niceTicks(0, Math.max(...yv), 5);
     const xScale = (v) => m.l + (W - m.l - m.r) * (v - xs[0]) / (xs[xs.length - 1] - xs[0]);
     const yScale = (v) => m.t + (H - m.t - m.b) * (1 - (v - ys[0]) / (ys[ys.length - 1] - ys[0]));
     axes(svg, W, H, m, ys, yScale, spec.yLabel, spec.yUnit);
@@ -234,7 +237,10 @@
       if (!isFinite(p.y)) continue;
       const x = xScale(p.x), y = yScale(p.y);
       el("circle", { cx: x, cy: y, r: p.strong ? 6 : 4.5, fill: p.color, stroke: "#fff", "stroke-width": 2 }, svg);
-      if (p.strong && p.short) txt(svg, x + 9, y - 7, p.short, { fill: INK, "font-weight": 600 });
+      if (p.strong && p.short) {
+        const left = x > W * 0.65;     // keep labels inside the plot near the right edge
+        txt(svg, left ? x - 9 : x + 9, y - 8, p.short, { fill: INK, "font-weight": 600, "text-anchor": left ? "end" : "start" });
+      }
       const hit = el("circle", { cx: x, cy: y, r: 12, fill: "transparent" }, svg);
       hit.addEventListener("pointermove", (e) => {
         const r = div.getBoundingClientRect();

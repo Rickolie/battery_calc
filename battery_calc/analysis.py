@@ -977,6 +977,9 @@ class Analysis:
               f"Comparison basis: the best battery per size class ({', '.join(f['cls'] for f in self.focus) or '–'}) "
               f"on {adv.label if adv else 'the best contract'}."]
         if self.focus:
+            sec.summary = "Best per size class – " + "; ".join(
+                f"{f['cls']}: {self.short_name(f['b'])}, {f['row']['payback_years']:.1f} yr, "
+                f"€{f['row']['_saving27']:,.0f}/yr" for f in self.focus) + "."
             md += [f"- **{f['cls']}:** {f['b'].name} – `{f['strategy']}`, payback {f['row']['payback_years']:.1f} "
                    f"years, €{f['row']['_saving27']:,.0f} a year from 2027" for f in self.focus]
         md += ["#### Strategies explained",
@@ -1518,6 +1521,13 @@ class Analysis:
               "`free day` = the whole firing runs on solar surplus (plus the battery) with at most "
               f"{tol:.0%} from the grid",
               f"`cost per firing = grid kWh × €{price:.3f}` (average all-in import price, 2027 rules)"]
+        if focus and ch_cls is not None:
+            col = "free_days_" + slug(ch_cls)
+            good = summ[summ[col] >= 20]
+            if len(good):
+                g = good.iloc[-1]
+                sec.summary = (f"A kiln up to {g.kiln_kw:g} kW fires on free power on {int(g[col])} days a year with the "
+                               f"{ch_cls} battery ({int(g.free_days_no_battery)} without a battery).")
         if len(best):
             last = best.iloc[-1]
             parts = [f"no battery {int(last.free_days_no_battery)}"]
