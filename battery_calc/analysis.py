@@ -578,6 +578,7 @@ class Analysis:
               "same, so one break-even applies; from 2027 the sell break-even is compared with the net feed-in price. "
               "Standby is a fixed cost, reported in Objective 3.",
               "`lifetime_limit` shows which limit (cycles, warranty throughput or calendar life) sets lifetime kWh."]
+        md += self.breakeven_explainer(rows)
         if cycles is None:
             md.append(f"Cycles per year: default {d.get('cycles_per_year', 250)} (replaced by simulated values in section 8).")
         sec.md = "\n".join(md)
@@ -608,6 +609,30 @@ class Analysis:
                            "compares prices incl. taxes, `setting_spot` if it compares spot (EPEX) prices "
                            "(all-in difference ÷ 1.21, because taxes per kWh are equal every hour).")
         self.emit(sec)
+
+    def breakeven_explainer(self, rows) -> list[str]:
+        """Plain-language formula with a worked example (first priced battery)."""
+        ex = next((r for r in rows if r["price_variant"] == "NL current" and r["purchase_eur"]
+                   and not math.isnan(r["wear_eur_kwh"])), None)
+        out = ["",
+               "**How the break-even price is calculated**",
+               "",
+               "`break-even price = charge price / RTE + wear cost` (€ per kWh delivered, all-in).",
+               "- **charge price / RTE** turns the price of a kWh *put into* the battery into the price of a kWh "
+               "*coming out*: with a round-trip efficiency (RTE) of 85% you lose 15%, so each delivered kWh costs "
+               "1/0.85 = 1.18 × the charge price.",
+               "- **wear cost** is already per kWh delivered (purchase price ÷ kWh the battery delivers over its "
+               "life), so it is added after the division – not `charge price / (RTE + wear cost)`.",
+               "- **Minimum price difference worth charging** = break-even − charge price "
+               "= charge price × (1/RTE − 1) + wear cost."]
+        if ex:
+            cp, rte, w = 0.20, ex["rte"], ex["wear_eur_kwh"]
+            be = cp / rte + w
+            out.append(f"- Example, {ex['battery']} (RTE {rte:.0%}, wear €{w:.3f}/kWh, €{ex['purchase_eur']:,.0f} "
+                       f"over {ex['lifetime_kwh']:,.0f} kWh) charging at €{cp:.2f}: {cp:.2f} / {rte:.2f} + {w:.3f} "
+                       f"= {cp / rte:.3f} + {w:.3f} = **€{be:.3f}/kWh**. Discharging only pays if that kWh is worth "
+                       f"at least this much, a price difference of €{be - cp:.3f}.")
+        return out
 
     def cheapest_dynamic(self):
         dyn = [c for c in self.contracts if c.is_dynamic]
