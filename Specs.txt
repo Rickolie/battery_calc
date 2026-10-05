@@ -454,3 +454,25 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - Home Battery Control's Dynamic strategy (Extreme-Pair Matching) is simulated as-is (`hbc_default`, `hbc_pv_first`).
   - The simulator's own Dynamic strategy adds peak reservation, which needs custom control.
 - **Run time:** battery runs use the cheapest dynamic contract (`payback_top_dynamic_contracts`).
+
+### 11.9 Advice section, zoomable charts and German prices (2026-10-05)
+
+- **Advice (shown first).** A recommendation section at the top of the website and report:
+  - **Basis:** the best battery on the recommended contract (the cheapest dynamic contract when price history exists).
+  - **Why:**
+    - payback and net present value
+    - € per usable kWh
+    - yearly saving from 2027, with the plain-strategy alternative when the best strategy needs custom control
+    - how often it fills completely, how often it stays below half full, and the share of the solar surplus it stores
+  - **Comparisons:** why not a clearly bigger battery (extra saving vs extra price), and the runner-up of a different model.
+  - **Combination table:** current and cheapest contract, each with and without the battery, as yearly cost from 2027.
+- **Daily charts for the recommended battery** on the cheapest contract (latest full price year, 2027–2029 rules):
+  - solar surplus, energy stored from solar or grid, and grid import with and without the battery, per day;
+  - saving per day plus the cumulative saving.
+
+  The day-by-day data is offered as a CSV download.
+- **Sanity check over the whole year:**
+  - a zoomable 15-minute chart (state of charge, house net power, battery power);
+  - a static daily chart with a legend.
+- **Zoomable charts:** uPlot (MIT licence), bundled in `battery_calc/static/`, so no external requests are made. Drag to zoom, double-click to reset, click a legend item to hide a series. The same charts are embedded in the downloadable HTML report; Markdown reports keep PNG charts.
+- **German prices:** besides Zendure, EcoFlow and Jackery, the scraper now reads the German Shopify shops of Marstek (marstek.de), Anker SOLIX (de.ankersolix.com), Hoymiles (de.hoymiles.com) and Indevolt (de.indevolt.com). `a++b` in `shop_urls_de` adds up separately sold parts (base unit + expansion module). Batteries without a German shop for that exact configuration (Marstek Venus E 4.0/Max, AEG, HomeWizard) or sold out stay empty.

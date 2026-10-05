@@ -86,7 +86,8 @@ def main():
     cfg = load_config(os.path.join(ROOT, "config.yaml"))
     for f in glob.glob(os.path.join(ROOT, "web", "*")):
         shutil.copy2(f, out)
-    package = [copy(f, out) for f in sorted(glob.glob(os.path.join(ROOT, "battery_calc", "*.py")))]
+    package = [copy(f, out) for f in sorted(glob.glob(os.path.join(ROOT, "battery_calc", "*.py")))
+               + sorted(glob.glob(os.path.join(ROOT, "battery_calc", "static", "*")))]
     config = copy(os.path.join(ROOT, "config.yaml"), out)
     data = []
     globs = [cfg["paths"]["price_glob"], *cfg["paths"].get("extra_price_globs", []), "data/online/*.csv"]

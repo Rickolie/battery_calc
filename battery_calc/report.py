@@ -66,6 +66,14 @@ def md_inline_to_html(text: str) -> str:
         esc = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", esc)
         esc = re.sub(r"(?<![\w*])\*([^*\s][^*]*?)\*(?![\w*])", r"<em>\1</em>", esc)
         esc = re.sub(r"`(.+?)`", r"<code>\1</code>", esc)
+        hm = re.match(r"^(#{2,4}) (.*)", esc)
+        if hm:
+            if in_list:
+                out.append("</ul>")
+                in_list = False
+            lvl = min(len(hm.group(1)) + 1, 5)
+            out.append(f"<h{lvl}>{hm.group(2)}</h{lvl}>")
+            continue
         m = re.match(r"^(\s*)- (.*)", esc)
         if m:
             if not in_list:
@@ -112,6 +120,9 @@ def columns_html(df: pd.DataFrame, name: str) -> str:
 def section_md(sec, fig_dir_rel: str | None = None) -> str:
     parts = [f"## {sec.title}", "", sec.md, ""]
     for name, df in sec.tables.items():
+        if name in getattr(sec, "csv_only", set()):
+            parts += [f"_{name}: {len(df)} rows, in the CSV download._", ""]
+            continue
         parts += [f"### {name}", "", table_md(df), "", columns_md(df, name), ""]
     for name in sec.figures:
         if fig_dir_rel is not None:
@@ -119,21 +130,48 @@ def section_md(sec, fig_dir_rel: str | None = None) -> str:
     return "\n".join(parts)
 
 
+def chart_html(spec: dict) -> str:
+    """Placeholder + data for an interactive (zoomable) chart, rendered by static/charts.js."""
+    import json
+    data = json.dumps(spec, separators=(",", ":"), allow_nan=False, default=float).replace("</", "<\\/")
+    note = "<p class='zoomhint'>Drag across the chart to zoom in, double-click to zoom out, click a legend item to hide it.</p>"
+    return f"<div class='ichart'></div><script type='application/json'>{data}</script>{note}"
+
+
 def section_html(sec) -> str:
     parts = [f"<section id='{sec.id}'><h2>{html.escape(sec.title)}</h2>", md_inline_to_html(sec.md)]
+    interactive = getattr(sec, "interactive", {}) or {}
+    for name, spec in interactive.items():
+        parts.append(chart_html(spec))
     for name, df in sec.tables.items():
+        if name in getattr(sec, "csv_only", set()):
+            parts.append(f"<p class='zoomhint'>{html.escape(name)}: {len(df)} rows – see the CSV download below.</p>")
+            continue
         parts += [f"<h3>{html.escape(name)}</h3>", table_html(df), columns_html(df, name)]
     for name, png in sec.figures.items():
+        if name in interactive:
+            continue          # shown as a zoomable chart above
         b64 = base64.b64encode(png).decode()
         parts.append(f"<figure><img alt='{html.escape(name)}' src='data:image/png;base64,{b64}'/></figure>")
     parts.append("</section>")
     return "\n".join(parts)
 
 
+def _static(name: str) -> str:
+    with open(os.path.join(os.path.dirname(__file__), "static", name), encoding="utf-8") as f:
+        return f.read()
+
+
+def order_sections(sections):
+    """The recommendation comes first in the final report."""
+    return sorted(sections, key=lambda s: 0 if s.id == "advice" else 1)
+
+
 CSS = """body{font-family:system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:16px;color:#1d1d1f;background:#fff}
 table{border-collapse:collapse;font-size:12px}td,th{border:1px solid #ddd;padding:3px 6px;text-align:right}
 th{background:#f3f4f6}td:first-child,th:first-child{text-align:left}.tbl{overflow-x:auto}
 img{max-width:100%}
+.ichart{margin:8px 0}.zoomhint{font-size:11px;color:#777;margin:0 0 12px}
 .cols{font-size:12px;margin:4px 0 14px}.cols summary{cursor:pointer;color:#555}
 .cols dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;margin:6px 0}
 .cols dt{font-family:monospace;font-weight:600}.cols dd{margin:0}code{background:#f3f4f6;padding:0 3px}
@@ -147,14 +185,15 @@ def header_md(meta: dict) -> str:
 
 
 def render_markdown(sections, meta, fig_dir_rel="figures") -> str:
-    return header_md(meta) + "\n".join(section_md(s, fig_dir_rel) for s in sections)
+    return header_md(meta) + "\n".join(section_md(s, fig_dir_rel) for s in order_sections(sections))
 
 
 def render_html(sections, meta) -> str:
-    body = "\n".join(section_html(s) for s in sections)
+    body = "\n".join(section_html(s) for s in order_sections(sections))
     title = "Battery payback report"
     return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' "
-            f"content='width=device-width,initial-scale=1'><title>{title}</title><style>{CSS}</style></head><body>"
+            f"content='width=device-width,initial-scale=1'><title>{title}</title><style>{CSS}{_static('uPlot.min.css')}</style>"
+            f"<script>{_static('uPlot.iife.min.js')}</script><script>{_static('charts.js')}</script></head><body>"
             + md_inline_to_html(header_md(meta).replace("# ", "**", 1).replace(" –", "** –", 1)) + body + "</body></html>")
 
 

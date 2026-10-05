@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -32,6 +33,8 @@ class Section:
     md: str = ""
     tables: dict = field(default_factory=dict)
     figures: dict = field(default_factory=dict)
+    interactive: dict = field(default_factory=dict)   # name -> chart spec (zoomable in HTML; PNG in Markdown)
+    csv_only: set = field(default_factory=set)       # table names offered as CSV download, not printed
 
 
 @dataclass
@@ -107,6 +110,7 @@ class Analysis:
         self.step_sanity()
         self.step_payback()
         self.step_kiln()
+        self.step_advice()
         return self.sections
 
     # ------------------------------------------------------------------ step 1
@@ -709,15 +713,23 @@ class Analysis:
               f"- Energy balance (import − export = net load + standby + battery AC flow): max error {balance:.2e} kWh."]
         sec.md = "\n".join(md)
         idx = self.profile.index
-        traces = {}
-        for title, month in (("Summer week", 7), ("Winter week", 1)):
-            sel = np.flatnonzero(idx.month == month)
-            if len(sel) >= 7 * 96:
-                s = sel[7 * 96: 14 * 96]
-                traces[f"{title} ({idx[s[0]]:%Y-%m-%d})"] = (idx[s], r.soc[s], net[s])
-        f = self.fig(charts.soc_weeks, traces)
+        sb = (b.standby_w or 0) / 4000.0
+        daily = extras.daily_battery(idx, net, r.batt_ac, r.soc, b.usable_kwh, sb)
+        md.append(f"- Whole year: the battery is completely full on {int(daily.full.sum())} days and "
+                  f"stays below half full on {int((daily.max_soc_kwh < 0.5 * b.usable_kwh).sum())} days (mostly winter).")
+        f = self.fig(charts.soc_year, daily, b.usable_kwh, f"{b.name}: whole year, self-consumption")
         if f:
-            sec.figures["soc_weeks"] = f
+            sec.figures["soc_year_daily"] = f
+        sec.interactive["soc_year_15min"] = {
+            "title": f"{b.name} – state of charge and house power, every 15 minutes",
+            "y": "kWh / kW", "height": 340,
+            "x": extras.ts(idx),
+            "series": [extras.series("State of charge (kWh)", r.soc, "#2a6f97", "area"),
+                       extras.series("House net power without battery (kW, + import / − export)", net * 4, "#e07a5f",
+                                     width=0.8),
+                       extras.series("Battery power (kW, + charging / − discharging)", r.batt_ac * 4, "#3d405b",
+                                     width=0.8)]}
+        sec.md = "\n".join(md)
         self.sanity = {"battery": b.id, "efc": r.efc, "balance_error": balance}
         self.emit(sec)
 
@@ -731,7 +743,7 @@ class Analysis:
         return out
 
     def sim_strategy(self, strategy, b, cap, per: Period, idx, c, scn, wear, windows=None, scale=1.0,
-                     rte=None, standby=None):
+                     rte=None, standby=None, keep_trace=False):
         net = per.imp - per.exp
         bb = b
         if rte is not None or standby is not None:
@@ -739,19 +751,19 @@ class Analysis:
             bb = replace(b, rte=rte if rte is not None else b.rte,
                          standby_w=standby if standby is not None else b.standby_w)
         if strategy == "self_consumption":
-            return simulate(net, SELF, bb, cap)
+            return simulate(net, SELF, bb, cap, keep_trace=keep_trace)
         u, s = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
         if strategy == "timed":
             modes = plan_timed(idx, windows or [])
-            return simulate(net, modes, bb, cap)
+            return simulate(net, modes, bb, cap, keep_trace=keep_trace)
         if strategy in ("dynamic", "dynamic_sell"):
             modes = plan_dynamic(idx, u, s, bb, cap, wear, scale, strategy == "dynamic_sell",
                                  self.cfg.get("strategies", {}).get("dynamic", {}), export=per.exp,
                                  solar_forecast=self.pv_for(idx), imports=per.imp)
-            return simulate(net, modes, bb, cap)
+            return simulate(net, modes, bb, cap, keep_trace=keep_trace)
         presets = self.cfg.get("strategies", {}).get("hbc_presets", {}) or {}
         if strategy in presets:
-            return simulate(net, plan_hbc(idx, u, presets[strategy]), bb, cap)
+            return simulate(net, plan_hbc(idx, u, presets[strategy]), bb, cap, keep_trace=keep_trace)
         if strategy == "perfect_foresight":
             lv = self.cfg.get("strategies", {}).get("perfect_foresight", {}).get("soc_levels", 21)
             return perfect_foresight(net, u, s, bb, cap, 0.0, lv)
@@ -856,6 +868,7 @@ class Analysis:
                 self.log(f"  simulated {b.name} × {c.label}")
         rec = pd.DataFrame(records)
         self.records = rec
+        self._meta = meta
         summary = self.payback_table(rec, meta, contracts)
         self.payback_summary = summary
         md = [f"Savings = cost without battery − cost with battery under the same contract, rules and price year "
@@ -983,7 +996,11 @@ class Analysis:
             self.log(f"  chosen battery {want!r} not found; using the fastest payback")
         rk = summary.get("ranked") if summary else None
         if rk is not None and len(rk):
-            r = rk[(rk.analysis == "headline") & (rk.price_variant == "NL current")]
+            r = rk[(rk.analysis == "headline") & (rk.price_variant == "NL current")
+                   & (rk.strategy != "perfect_foresight")]
+            adv = self.advice_contract()
+            if adv is not None and (r._cid == adv.id).any():
+                r = r[r._cid == adv.id]
             if len(r):
                 bid = r.sort_values("payback_years").iloc[0]["_bid"]
                 return next(b for b in self.batteries if b.id == bid)
@@ -1089,6 +1106,180 @@ class Analysis:
         if f:
             sec.figures["kiln_free_days"] = f
         self.emit(sec)
+
+    # ------------------------------------------------------------------ advice (shown first)
+    def step_advice(self):
+        sec = Section("advice", "Advice – which battery, which contract, and why")
+        summary = getattr(self, "payback_summary", None)
+        rk = summary.get("ranked") if summary else None
+        if rk is None or rk.empty or getattr(self, "chosen", None) is None:
+            sec.md = "No battery with a price could be simulated, so there is no recommendation yet."
+            self.emit(sec)
+            return
+        adv = self.advice_contract()
+        h = rk[(rk.analysis == "headline") & (rk.price_variant == "NL current") & (rk.strategy != "perfect_foresight")]
+        if adv is not None and (h._cid == adv.id).any():
+            h = h[h._cid == adv.id]
+        ranked = h.sort_values("payback_years").drop_duplicates("_bid")
+        rec = self.records
+
+        def describe(r):
+            b = next(x for x in self.batteries if x.id == r["_bid"])
+            cap = self.conn.battery_cap_w(b.phases)
+            net = (self.profile["imp"] - self.profile["exp"]).values
+            sim = simulate(net, SELF, b, cap, keep_trace=True)
+            daily = extras.daily_battery(self.profile.index, net, sim.batt_ac, sim.soc, b.usable_kwh,
+                                         (b.standby_w or 0) / 4000.0)
+            sv = rec[(rec.battery_id == b.id) & (rec.contract_id == r["_cid"]) & (rec.strategy == r["strategy"])]
+            sv27 = sv[(sv.scenario == "nosal_min50") & ~sv.partial
+                      & sv.price_year.isin(["profile"] + list(self.head_years))]
+            surplus = daily.solar_surplus_kwh.sum()
+            return {"battery": b.name, "price_eur": r["price_eur"], "eur_per_kwh_usable": r["eur_per_kwh_usable"],
+                    "usable_kwh": b.usable_kwh, "contract": r["contract"], "strategy": r["strategy"],
+                    "saving_eur_year_2027": sv27.saving.mean() if len(sv27) else np.nan,
+                    "payback_years": r["payback_years"], "npv_eur": r["npv_eur"],
+                    "days_full": int(daily.full.sum()),
+                    "days_below_half": int((daily.max_soc_kwh < 0.5 * b.usable_kwh).sum()),
+                    "share_of_surplus_stored": daily.charged_from_solar_kwh.sum() / surplus if surplus else np.nan,
+                    "_bid": b.id, "_cid": r["_cid"], "_model": re.sub(r"\s*\(.*\)$", "", b.name)}
+
+        top = ranked.head(6).to_dict("records")
+        comp = pd.DataFrame([describe(r) for r in top])
+        chosen_fixed = self.opts.chosen_battery or self.cfg.get("chosen_battery")
+        b = self.chosen if chosen_fixed else next(x for x in self.batteries if x.id == comp.iloc[0]["_bid"])
+        self.chosen = b
+        if not (comp._bid == b.id).any():
+            r = ranked[ranked._bid == b.id]
+            if len(r):
+                comp = pd.concat([pd.DataFrame([describe(r.iloc[0].to_dict())]), comp], ignore_index=True)
+        row = comp[comp._bid == b.id].iloc[0] if (comp._bid == b.id).any() else comp.iloc[0]
+        # a clearly bigger battery, even if it is not in the top 6
+        big = ranked[ranked.usable_kwh > row.usable_kwh * 1.6]
+        bigger = describe(big.iloc[0].to_dict()) if len(big) else None
+        if bigger is not None and not (comp._bid == bigger["_bid"]).any():
+            comp = pd.concat([comp, pd.DataFrame([bigger])], ignore_index=True)
+        sec.tables["battery_comparison"] = comp.round(2)
+        md = [f"### Best choice: **{b.name}**" + (f" on **{adv.label}**" if adv is not None else ""), ""]
+        md.append(f"- **Pays back fastest:** {row.payback_years:.1f} years at €{row.price_eur:,.0f} "
+                  f"(€{row.eur_per_kwh_usable:,.0f} per usable kWh), net present value €{row.npv_eur:,.0f} over its life.")
+        md.append(f"- **Saves about €{row.saving_eur_year_2027:,.0f} per year** from 2027 with strategy "
+                  f"`{row.strategy}` on {row.contract}.")
+        if row.strategy in ("dynamic", "dynamic_sell", "timed"):
+            simple = rec[(rec.battery_id == b.id) & (rec.contract_id == row._cid) & (rec.scenario == "nosal_min50")
+                         & ~rec.partial & rec.price_year.isin(["profile"] + list(self.head_years))
+                         & rec.strategy.isin(["self_consumption", "hbc_pv_first"])]
+            if len(simple):
+                ss = simple.groupby("strategy").saving.mean().sort_values(ascending=False)
+                md[-1] += (f" `{row.strategy}` needs custom control (see section 7); with plain `{ss.index[0]}`, "
+                           f"which the battery's own app or Home Battery Control can do as-is, it saves "
+                           f"€{ss.iloc[0]:,.0f} per year.")
+        md.append(f"- **Its size fits your surplus:** it fills completely on {row.days_full} days a year and stores "
+                  f"{row.share_of_surplus_stored:.0%} of your solar surplus. In winter it stays below half full on "
+                  f"{row.days_below_half} days, so a bigger battery would mainly add capacity that sits idle.")
+        if bigger is not None:
+            extra = bigger["saving_eur_year_2027"] - row.saving_eur_year_2027
+            md.append(f"- **Why not bigger?** {bigger['battery']} ({bigger['usable_kwh']:.1f} kWh usable) saves only "
+                      f"€{extra:,.0f} more per year for €{bigger['price_eur'] - row.price_eur:,.0f} more, so it pays back "
+                      f"in {bigger['payback_years']:.1f} years.")
+        others = comp[(comp._model != row._model)]
+        if len(others):
+            o = others.iloc[0]
+            md.append(f"- **Runner-up:** {o.battery}, {o.payback_years:.1f} years "
+                      f"(€{o.eur_per_kwh_usable:,.0f} per usable kWh).")
+        combo = self.combination_table(b)
+        if combo is not None:
+            sec.tables["contract_and_battery_combinations"] = combo
+            best_c = combo.iloc[combo.yearly_cost_eur_2027.idxmin()]
+            md.append(f"- **Cheapest combination from 2027:** {best_c.option} – about €{best_c.yearly_cost_eur_2027:,.0f} "
+                      f"a year, €{combo.iloc[0].yearly_cost_eur_2027 - best_c.yearly_cost_eur_2027:,.0f} less than "
+                      "today's situation (see the combination table).")
+        dyn = adv if (adv is not None and adv.is_dynamic) else None
+        md.append("")
+        md.append("The table compares the top batteries; the two charts below show, for the recommended battery, how "
+                  "much solar surplus there is each day and how much of it the battery stores, and what it saves each day.")
+        sec.md = "\n".join(md)
+        self.advice_charts(sec, b, dyn)
+        self.emit(sec)
+
+    def advice_contract(self):
+        """The contract the advice is built on: the cheapest dynamic contract when price history exists."""
+        return self.cheapest_dynamic() or self.current
+
+    def combination_table(self, b):
+        """Yearly cost from 2027 (last 3 price years) for current/cheapest contract, with and without battery."""
+        e = getattr(self, "expected_by_contract", {}) or {}
+        rec = self.records
+        rows = []
+        for c in [x for x in (self.current, self.cheapest_dynamic()) if x is not None]:
+            base = e.get(c.id, {}).get("nosal_min50")
+            if base is None:
+                continue
+            sv = rec[(rec.battery_id == b.id) & (rec.contract_id == c.id) & (rec.scenario == "nosal_min50")
+                     & ~rec.partial & rec.price_year.isin(["profile"] + list(self.head_years))
+                     & (rec.strategy != "perfect_foresight")]
+            best = sv.groupby("strategy").saving.mean().sort_values(ascending=False)
+            rows.append({"option": f"{c.label}, no battery", "yearly_cost_eur_2027": base, "battery_saving_eur": 0.0,
+                         "strategy": ""})
+            if len(best):
+                rows.append({"option": f"{c.label} + {b.name}", "yearly_cost_eur_2027": base - best.iloc[0],
+                             "battery_saving_eur": best.iloc[0], "strategy": best.index[0]})
+        return pd.DataFrame(rows).round(0) if rows else None
+
+    def advice_charts(self, sec, b, dyn):
+        cap = self.conn.battery_cap_w(b.phases)
+        scn = "nosal_min50"
+        c = dyn or self.current or (self.contracts[0] if self.contracts else None)
+        if c is None:
+            return
+        rk = self.payback_summary["ranked"]
+        h = rk[(rk._bid == b.id) & (rk._cid == c.id) & (rk.analysis == "headline")
+               & (rk.price_variant == "NL current") & (rk.strategy != "perfect_foresight")]
+        strat = h.sort_values("payback_years").iloc[0]["strategy"] if len(h) else "self_consumption"
+        year = self.head_years[-1] if (c.is_dynamic and self.head_years) else "profile"
+        pers = self.periods(c, scn, [year] if c.is_dynamic else None)
+        if not pers:
+            return
+        _, per, idx, _ = pers[-1]
+        wear = self.wear_for(b)[0]
+        m = getattr(self, "_meta", {}).get((b.id, c.id), {})
+        r = self.sim_strategy(strat, b, cap, per, idx, c, scn, wear, windows=m.get("windows"), keep_trace=True)
+        net = per.imp - per.exp
+        u, s_ = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
+        per_q = (per.imp - r.imp) * u - (per.exp - r.exp) * s_
+        saving = pd.Series(per_q, index=idx).groupby(idx.date).sum()
+        saving.index = pd.to_datetime(saving.index)
+        soc = r.soc if r.soc is not None else np.zeros(len(net))
+        daily = extras.daily_battery(idx, net, r.batt_ac, soc, b.usable_kwh, (b.standby_w or 0) / 4000.0)
+        label = f"{year} prices" if year != "profile" else "your profile year"
+        sec.csv_only.add("daily_overview")
+        sec.tables["daily_overview"] = daily.assign(saving_eur=saving.values).reset_index(names="date").assign(
+            date=lambda d: d.date.dt.strftime("%Y-%m-%d")).round(2)
+        f = self.fig(charts.daily_charge, daily, b.usable_kwh, f"{b.name}: solar surplus and storage per day")
+        if f:
+            sec.figures["daily_charge"] = f
+        dx = extras.ts(pd.DatetimeIndex(daily.index).tz_localize("Europe/Amsterdam"))
+        sec.interactive["daily_charge"] = {
+            "title": f"{b.name} – per day: solar surplus, stored energy and grid import ({label}, 2027 rules)",
+            "y": "kWh per day", "daily": True, "height": 340, "x": dx,
+            "series": [extras.series("Solar surplus (kWh)", daily.solar_surplus_kwh, "#e9b44c", "bar"),
+                       extras.series("Stored from solar (kWh)", daily.charged_from_solar_kwh, "#81b29a", "bar"),
+                       extras.series("Charged from grid (kWh)", daily.charged_from_grid_kwh, "#9c6644", "bar"),
+                       extras.series("Grid import without battery (kWh)", daily.import_before_kwh, "#3d405b"),
+                       extras.series("Grid import with battery (kWh)", daily.import_after_kwh, "#e07a5f"),
+                       extras.series(f"Usable capacity ({b.usable_kwh:.1f} kWh)", [b.usable_kwh] * len(daily),
+                                     "#2a6f97", dash=[6, 4])]}
+        f = self.fig(charts.daily_savings, saving, f"{b.name} with {c.label}: saving per day ({label}, 2027 rules)")
+        if f:
+            sec.figures["daily_savings"] = f
+        sec.interactive["daily_savings"] = {
+            "title": f"{b.name} with {c.label} – saving per day ({label}, 2027–2029 rules, strategy {strat})",
+            "y": "€ per day", "y2": "€ cumulative", "daily": True, "height": 320,
+            "x": extras.ts(pd.DatetimeIndex(saving.index).tz_localize("Europe/Amsterdam")),
+            "series": [extras.series("Saving that day (€)", saving.values, "#81b29a", "bar"),
+                       extras.series("Cumulative saving (€)", saving.cumsum().values, "#2a6f97", scale="y2", width=2)]}
+        sec.md += (f"\n\nDaily charts: {b.name} on {c.label}, strategy `{strat}`, {label} under the 2027–2029 rules. "
+                   f"Total saving that year: €{saving.sum():,.0f}; best day €{saving.max():,.2f}, "
+                   f"{int((saving <= 0.01).sum())} days with (almost) no saving.")
 
     def bname(self, bid):
         return next((b.name for b in self.batteries if b.id == bid), bid)

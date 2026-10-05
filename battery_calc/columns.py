@@ -167,6 +167,27 @@ GLOSSARY = {
     "payback_de_est": "Payback at the estimated German Black Friday price plus travel cost (years).",
     "deal_found": "Date and shop where the deal price was found.",
     "best_payback": "Best payback of the real deals, or of the estimate/today's price if no deal is known yet.",
+    # ------------------------------------------------------------ advice
+    "saving_eur_year_2027": "Average yearly saving with this battery from 2027 (2027–2029 rules, last 3 price years), €.",
+    "days_full": "Days per year on which the battery gets completely full (self-consumption on your profile year).",
+    "days_below_half": "Days per year on which the battery never gets more than half full (mostly winter) – "
+                       "capacity that sits idle.",
+    "share_of_surplus_stored": "Share of your yearly solar surplus that ends up in the battery instead of the grid.",
+    "option": "Contract, with or without the recommended battery.",
+    "yearly_cost_eur_2027": "Total yearly electricity cost from 2027 (2027–2029 rules, last 3 price years), incl. "
+                            "taxes and fixed costs, minus the battery saving (purchase price not included).",
+    "battery_saving_eur": "Yearly saving of the battery in this combination (€).",
+    "date": "Day.",
+    "solar_surplus_kwh": "Solar surplus that day without a battery: what would otherwise go to the grid (kWh).",
+    "charged_from_solar_kwh": "Energy stored in the battery from solar surplus that day (kWh).",
+    "charged_from_grid_kwh": "Energy charged from the grid that day (kWh), e.g. at very low dynamic prices.",
+    "discharged_kwh": "Energy the battery delivered that day (kWh).",
+    "import_before_kwh": "Grid import that day without a battery (kWh).",
+    "import_after_kwh": "Grid import that day with the battery (kWh).",
+    "max_soc_kwh": "Highest state of charge that day (kWh).",
+    "min_soc_kwh": "Lowest state of charge that day (kWh).",
+    "full": "True if the battery got completely full that day.",
+    "saving_eur": "Saving that day compared with no battery (€).",
     # ------------------------------------------------------------ kiln
     "kiln_kw": "Rated power of the kiln (kW).",
     "firing_kwh": "Energy for one firing to maximum temperature: kW × hours × average power share.",

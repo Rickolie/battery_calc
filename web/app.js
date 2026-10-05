@@ -122,7 +122,9 @@ function onSection(sec) {
     links.appendChild(downloadLink(name, csv, "text/csv"));
   }
   div.querySelector("section").appendChild(links);
-  $("results").appendChild(div);
+  // The recommendation goes to the top; everything else in order of arrival.
+  if (sec.id === "advice") $("results").prepend(div); else $("results").appendChild(div);
+  if (window.renderInteractiveCharts) window.renderInteractiveCharts(div);
   status(`Computed: ${sec.title}`);
 }
 
