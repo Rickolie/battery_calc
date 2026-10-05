@@ -19,7 +19,8 @@ def build_parser(cfg_default_conn="3x25"):
     p.add_argument("--pv", default=None, help="optional PV production CSV")
     p.add_argument("--no-current-contract", action="store_true")
     p.add_argument("--price-variant", default="all",
-                   choices=["all", "NL current", "NL lowest-ever", "DE 0% VAT (scenario)"])
+                   choices=["all", "NL current", "NL lowest-ever", "DE 0% VAT (scenario)", "NL Black Friday",
+                            "NL Black Friday (est.)", "DE Black Friday", "DE Black Friday (est.)"])
     p.add_argument("--feed-in-2030", type=float, default=None, help="minimum feed-in fraction from 2030 (default 0)")
     p.add_argument("--quick", action="store_true", help="headline years only")
     p.add_argument("--no-plots", action="store_true")

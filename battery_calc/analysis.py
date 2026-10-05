@@ -873,6 +873,20 @@ class Analysis:
         ys = self.savings_year_chart(rec)
         if ys:
             sec.figures["savings_per_price_year"] = ys
+        bft = self.blackfriday_table(summary)
+        if bft is not None:
+            sec.tables["black_friday_quick_decision"] = bft
+            bfc = self.cfg.get("blackfriday", {}) or {}
+            w = bfc.get("window", ["11-20", "12-01"])
+            found = bft["nl_deal_eur"].notna().any() or bft["de_deal_eur"].notna().any()
+            md.append(f"**Black Friday quick decision** (window {w[0]} – {w[1]}, Black Friday {bfc.get('date', '')}): "
+                      "per battery its best contract and strategy, today's price, the real deal price the scraper "
+                      "found during the window (NL incl. VAT, DE 0% VAT from German manufacturer shops) with the "
+                      "discount against the last normal price, and the estimate "
+                      f"(−{float(bfc.get('discount_nl', 0.15)):.0%} NL / −{float(bfc.get('discount_de', 0.15)):.0%} DE). "
+                      "Sorted by the best available payback. "
+                      + ("" if found else "No real deals recorded yet: the scraper fills them in during the window "
+                         "(every 4 hours), until then the estimate columns apply."))
         self.chosen = self.pick_battery(summary)
         if self.chosen is not None:
             split = self.earnings_by_strategy(self.chosen, contracts, meta)
@@ -898,6 +912,41 @@ class Analysis:
                                & (rec.scenario == "nosal_min50")]["efc"].mean()
         if cyc:
             self.step_breakeven(cycles=cyc)
+
+    def blackfriday_table(self, summary):
+        rk = summary.get("ranked") if summary else None
+        if rk is None or rk.empty:
+            return None
+        h = rk[(rk.analysis == "headline") & (rk.strategy != "perfect_foresight")]   # only achievable strategies
+        now = h[h.price_variant == "NL current"]
+        if now.empty:
+            return None
+        best = now.sort_values("payback_years").drop_duplicates("_bid")
+        rows = []
+        for r in best.to_dict("records"):
+            b = next(x for x in self.batteries if x.id == r["_bid"])
+            same = h[(h._bid == r["_bid"]) & (h._cid == r["_cid"]) & (h.strategy == r["strategy"])]
+            pb = dict(zip(same.price_variant, same.payback_years))
+            pr = dict(zip(same.price_variant, same.price_eur))
+            disc = lambda deal, ref: (1 - deal / ref) if (deal and ref) else None
+            row = {"battery": r["battery"], "usable_kwh": r["usable_kwh"], "contract": r["contract"],
+                   "strategy": r["strategy"],
+                   "nl_now_eur": pr.get("NL current"), "payback_now": pb.get("NL current"),
+                   "nl_deal_eur": b.price_bf_nl, "nl_deal_discount": disc(b.price_bf_nl, b.price_nl_ref),
+                   "payback_nl_deal": pb.get("NL Black Friday"),
+                   "nl_est_eur": pr.get("NL Black Friday (est.)"), "payback_nl_est": pb.get("NL Black Friday (est.)"),
+                   "de_now_eur": b.price_de, "de_deal_eur": b.price_bf_de,
+                   "de_deal_discount": disc(b.price_bf_de, b.price_de_ref),
+                   "payback_de_deal": pb.get("DE Black Friday"), "payback_de_est": pb.get("DE Black Friday (est.)"),
+                   "deal_found": "; ".join(x for x in (b.bf_nl_info, b.bf_de_info) if x)}
+            cands = [v for v in (row["payback_nl_deal"], row["payback_de_deal"]) if v is not None]
+            row["best_payback"] = min(cands) if cands else min(
+                v for v in (row["payback_nl_est"], row["payback_now"]) if v is not None)
+            rows.append(row)
+        df = pd.DataFrame(rows).sort_values("best_payback").reset_index(drop=True)
+        for c in ("nl_deal_discount", "de_deal_discount"):
+            df[c] = df[c].map(lambda v: f"{v:.0%}" if isinstance(v, float) and not np.isnan(v) else "")
+        return df.round(2)
 
     # ------------------------------------------------------------------ 11.4 / 11.6 helpers
     def pick_battery(self, summary) -> Battery | None:

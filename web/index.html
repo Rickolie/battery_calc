@@ -20,6 +20,9 @@ button:disabled{opacity:.5;cursor:not-allowed}
 label{display:block;margin:8px 0 2px;font-weight:600}
 input,select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);max-width:100%}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 16px}
+fieldset{border:1px solid var(--line);border-radius:8px;margin:12px 0;padding:8px 12px 12px}
+legend{font-weight:700;padding:0 6px}
+.help{color:var(--muted);font-size:.85rem;margin:4px 0 0;line-height:1.4}
 .hidden{display:none}.ok{color:var(--ok)}.warn{color:var(--warn)}.err{color:var(--err)}
 .tbl{overflow-x:auto}table{border-collapse:collapse;font-size:12px}td,th{border:1px solid var(--line);padding:3px 6px;text-align:right;white-space:nowrap}
 th{background:var(--card)}td:first-child,th:first-child{text-align:left}
@@ -72,30 +75,103 @@ code{background:var(--card);padding:0 3px;border-radius:3px}
 
   <div id="step3" class="card hidden">
     <h2>Step 3 – settings</h2>
-    <div class="grid">
-      <div><label for="connection">Grid connection</label>
-        <select id="connection"></select></div>
-      <div><label for="margin">Connection margin</label>
-        <select id="margin"><option value="0.1">10%</option><option value="0.2" selected>20%</option><option value="0.3">30%</option></select></div>
-      <div><label for="variant">Battery price / VAT variant</label>
-        <select id="variant"><option value="all">All variants</option><option>NL current</option><option>NL lowest-ever</option><option>DE 0% VAT (scenario)</option></select></div>
-      <div><label for="fi2030">Feed-in minimum from 2030</label>
-        <select id="fi2030"><option value="0">0% (default)</option><option value="0.3">30% (sensitivity)</option></select></div>
-      <div><label for="bset">Batteries to compare</label>
-        <select id="bset"><option value="shortlist">Shortlist (10, faster)</option><option value="all">All batteries</option></select></div>
-      <div><label for="chosen">Battery for the earnings split and the kiln</label>
-        <select id="chosen"><option value="">Fastest payback (automatic)</option></select></div>
-      <div><label for="bfnl">Black Friday discount NL (estimate)</label>
-        <input id="bfnl" inputmode="decimal" value="15"> %</div>
-      <div><label for="bfde">Black Friday discount DE (estimate)</label>
-        <input id="bfde" inputmode="decimal" value="15"> %</div>
-      <div><label for="kh">Kiln: hours to maximum temperature</label>
-        <input id="kh" inputmode="decimal" value="8"></div>
-      <div><label for="kd">Kiln: average share of rated power</label>
-        <input id="kd" inputmode="decimal" value="70"> %</div>
-      <div><label for="quick">Price years</label>
-        <select id="quick"><option value="0">Full history 2013–2026 + last 3 years</option><option value="1">Last 3 years only (faster)</option></select></div>
-    </div>
+    <p class="muted">The defaults suit most households. Each setting explains what it changes; you can run the
+      analysis again with other settings at any time.</p>
+
+    <fieldset>
+      <legend>Your grid connection</legend>
+      <div class="grid">
+        <div><label for="connection">Grid connection</label>
+          <select id="connection"></select>
+          <p class="help">The size of your main fuse, shown on the meter cabinet or your grid operator's bill:
+            <b>1 ×</b> = single-phase, <b>3 ×</b> = three-phase, the number is amps per phase (most Dutch homes: 3 × 25 A).
+            It sets the maximum battery power (230 V × amps per phase). On a single-phase connection,
+            three-phase batteries and kilns above 3.68 kW are left out.</p></div>
+        <div><label for="margin">Connection margin</label>
+          <select id="margin"><option value="0.1">10%</option><option value="0.2" selected>20%</option><option value="0.3">30%</option></select>
+          <p class="help">Safety room kept free on each phase for the rest of the house (oven, heat pump, car).
+            20% means a battery may use at most 80% of a phase: 4.6 kW on 25 A. A higher margin lowers the
+            battery power used in the simulation.</p></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Prices and future rules</legend>
+      <div class="grid">
+        <div><label for="variant">Battery purchase price</label>
+          <select id="variant">
+            <option value="all">All variants (recommended)</option>
+            <option>NL current</option><option>NL lowest-ever</option><option>DE 0% VAT (scenario)</option>
+            <option>NL Black Friday</option><option>NL Black Friday (est.)</option>
+            <option>DE Black Friday</option><option>DE Black Friday (est.)</option></select>
+          <p class="help">Which price the payback is calculated with. <b>NL current</b>: today's lowest price in
+            Dutch shops, incl. VAT. <b>NL lowest-ever</b>: the lowest price the scraper has seen. <b>DE 0% VAT</b>:
+            German manufacturer shops without VAT (only delivered in Germany; check whether you can buy there).
+            <b>Black Friday</b>: the real deal found during the Black Friday window, or <b>(est.)</b> an estimate
+            with the discount set below. "All variants" shows them side by side.</p></div>
+        <div><label for="fi2030">Feed-in minimum from 2030</label>
+          <select id="fi2030"><option value="0">0% (default)</option><option value="0.3">30% (sensitivity)</option></select>
+          <p class="help">From 2027 to 2029 suppliers must pay at least 50% of the energy price for power you
+            export. From 2030 that legal minimum ends. <b>0%</b> assumes you then only get what the supplier
+            offers; <b>30%</b> is a milder scenario. A lower value makes storing your own solar power more valuable.</p></div>
+        <div><label for="quick">Price years</label>
+          <select id="quick"><option value="0">Full history 2013–2026 + last 3 years</option><option value="1">Last 3 years only (faster)</option></select>
+          <p class="help">Dynamic contracts and battery trading are tested against real day-ahead prices of past
+            years. <b>Last 3 years</b> (2023–2025) is the headline and best reflects today's market;
+            the full history adds the calm pre-2021 years and the 2022 crisis as a range. Full history takes about
+            three times longer.</p></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Batteries</legend>
+      <div class="grid">
+        <div><label for="bset">Batteries to compare</label>
+          <select id="bset"><option value="shortlist">Shortlist (10, faster)</option><option value="all">All batteries</option></select>
+          <p class="help">The <b>shortlist</b> holds 10 representative plug-in batteries (about 5 minutes).
+            <b>All batteries</b> compares every size and brand in the dataset (34 configurations) and can take
+            15–30 minutes in the browser.</p></div>
+        <div><label for="chosen">Battery for the earnings chart and the kiln</label>
+          <select id="chosen"><option value="">Fastest payback (automatic)</option></select>
+          <p class="help">One battery is worked out in more detail: the yearly earnings per strategy (where the
+            money comes from) and the pottery kiln objective. "Automatic" picks the battery with the fastest payback.</p></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Black Friday</legend>
+      <p class="help">During the Black Friday window (20 November – 1 December) the price scraper checks the shops
+        every 4 hours and records the lowest price it finds as the real deal, next to the last normal price.
+        The report then shows a "Black Friday quick decision" table with the deal, its discount and the payback.
+        Until real deals are found, the estimate below is used.</p>
+      <div class="grid">
+        <div><label for="bfnl">Estimated discount NL</label>
+          <input id="bfnl" inputmode="decimal" value="15"> %
+          <p class="help">Discount assumed on today's Dutch price for the "NL Black Friday (est.)" rows.</p></div>
+        <div><label for="bfde">Estimated discount DE</label>
+          <input id="bfde" inputmode="decimal" value="15"> %
+          <p class="help">Discount assumed on the German price (without VAT) for the "DE Black Friday (est.)"
+            rows. Without a German price the Dutch price without VAT is used. A travel/shipping cost of €50 is added.</p></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Pottery kiln on free power</legend>
+      <p class="help">How many days per year a kiln can do a full firing on solar surplus (plus the chosen
+        battery), with at most 5% of its energy from the grid. Take the values from your kiln's data sheet.</p>
+      <div class="grid">
+        <div><label for="kh">Hours to maximum temperature</label>
+          <input id="kh" inputmode="decimal" value="8">
+          <p class="help">Length of one firing to the highest temperature you use (stoneware about 1250–1300 °C),
+            including the slow start. Typical: 7–10 hours.</p></div>
+        <div><label for="kd">Average share of rated power</label>
+          <input id="kd" inputmode="decimal" value="70"> %
+          <p class="help">A kiln switches its elements on and off; on average it draws only part of its rated
+            power. Energy per firing = rated kW × hours × this share (8 h × 70% = 5.6 kWh per rated kW).
+            Use 100% to be on the safe side.</p></div>
+      </div>
+    </fieldset>
+
     <p><button id="run">Run analysis</button></p>
   </div>
 

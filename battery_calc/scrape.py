@@ -170,63 +170,148 @@ def shop_price(page: str, url: str, match: str) -> float | None:
     return min(prices) if prices else None
 
 
-def scrape_battery_prices(cfg: dict) -> str:
-    """Updates `price_nl_incl_vat` from the shop pages in `shop_urls`
-    (`url|match` entries separated by spaces; the lowest price wins) and the
-    optional `tweakers_url`, `price_de_excl_vat` from `idealo_url`, and tracks
-    the lowest NL price seen."""
+def _variant_match(title: str, match: str) -> bool:
+    """`&`-separated tokens: plain = must contain, `!x` = must not contain,
+    `=x` = title equals x (case-insensitive, decimal comma = dot)."""
+    t = title.lower().replace(",", ".").replace("\u202f", " ")
+    for tok in (x.strip() for x in match.split("&")):
+        if not tok:
+            continue
+        tok = tok.lower().replace(",", ".")
+        if tok.startswith("!"):
+            if tok[1:] in t:
+                return False
+        elif tok.startswith("="):
+            if t != tok[1:]:
+                return False
+        elif tok not in t:
+            return False
+    return True
+
+
+def shopify_price(url: str, match: str, get=None) -> tuple[float, float | None] | None:
+    """Lowest available variant of a Shopify product matching `match`:
+    (price, compare_at_price). Uses the store's public /products/<handle>.json."""
+    m = re.match(r"(https?://[^/]+)/products/([^/?#]+)", url)
+    if not m:
+        return None
+    # The .js endpoint includes stock status; prices are in cents.
+    raw = (get or fetch)(f"{m.group(1)}/products/{m.group(2)}.js")
+    best = None
+    for v in json.loads(raw)["variants"]:
+        if not v.get("available", True) or not _variant_match(v.get("title", ""), match):
+            continue
+        p = float(v["price"]) / 100.0
+        cap = float(v["compare_at_price"]) / 100.0 if v.get("compare_at_price") else None
+        if best is None or p < best[0]:
+            best = (p, cap)
+    return best
+
+
+def blackfriday_window(cfg: dict, today: dt.date) -> tuple[dt.date, dt.date]:
+    bf = cfg.get("blackfriday", {}) or {}
+    a, b = bf.get("window", ["11-20", "12-01"])
+    mk = lambda md: dt.date(today.year, int(md[:2]), int(md[3:5]))
+    return mk(a), mk(b)
+
+
+def scrape_battery_prices(cfg: dict, force_blackfriday: bool = False, today: dt.date | None = None) -> str:
+    """Current prices per battery: NL (incl. VAT) from `shop_urls` and
+    `tweakers_url`, DE (0% VAT) from `shop_urls_de`. Entries are separated by
+    spaces: `url|match` for known shop pages, `shopify:url|match` for Shopify
+    stores (sold-out variants are skipped). The lowest price wins and the lowest NL price ever is tracked.
+
+    Black Friday (Specs.txt 11.5): inside `blackfriday.window` (default
+    20 Nov - 1 Dec) the lowest price seen is stored as the Black Friday price,
+    next to the last normal price before the window, so the report can show
+    the real deal and its discount."""
+    today = today or dt.date.today()
+    tstr = today.isoformat()
     path = resolve(cfg, cfg["paths"]["batteries_file"])
     df = pd.read_csv(path, dtype=str).fillna("")
-    for col in ("tweakers_url", "idealo_url", "shop_urls"):
+    cols = ["tweakers_url", "idealo_url", "shop_urls", "shop_urls_de", "price_nl_ref_incl_vat", "price_de_ref_excl_vat",
+            "price_blackfriday_nl_incl_vat", "price_blackfriday_nl_date", "price_blackfriday_nl_source",
+            "price_blackfriday_de_excl_vat", "price_blackfriday_de_date", "price_blackfriday_de_source"]
+    for col in cols:
         if col not in df.columns:
             df[col] = ""
-    n, errors, cache = 0, [], {}
+    w0, w1 = blackfriday_window(cfg, today)
+    in_bf = force_blackfriday or (w0 <= today <= w1)
+    n, deals, errors, cache = 0, 0, [], {}
 
     def get(url):
         if url not in cache:
             cache[url] = fetch(url)
         return cache[url]
 
-    for i, r in df.iterrows():
+    def collect(field: str, rid: str) -> list:
         found = []
-        entries = [e for e in re.split(r"\s+(?=https?://)", r["shop_urls"].strip()) if e]
-        for entry in entries:
+        for entry in [e for e in re.split(r"\s+(?=(?:shopify:)?https?://)", field.strip()) if e]:
             url, _, match = entry.partition("|")
             try:
-                p = shop_price(get(url), url, match if match.startswith("ajax:") else match.replace("_", " "))
+                if url.startswith("shopify:"):
+                    url = url[8:]
+                    r = shopify_price(url, match, get)
+                    p = r[0] if r else None
+                else:
+                    p = shop_price(get(url), url, match if match.startswith("ajax:") else match.replace("_", " "))
                 if p:
                     found.append((p, url))
                 else:
-                    errors.append(f"{r['id']}: no price matching '{match}' on {url}")
+                    errors.append(f"{rid}: no price matching '{match}' on {url}")
             except Exception as e:
-                errors.append(f"{r['id']} {url}: {e}")
+                errors.append(f"{rid} {url}: {e}")
+        return found
+
+    for i, r in df.iterrows():
+        nl = collect(r["shop_urls"], r["id"])
         if r["tweakers_url"]:
             try:
                 p = find_price(get(r["tweakers_url"]))
                 if p:
-                    found.append((p, r["tweakers_url"]))
+                    nl.append((p, r["tweakers_url"]))
             except Exception as e:
                 errors.append(f"{r['id']} tweakers: {e}")
-        if found:
-            p, url = min(found)
-            df.at[i, "price_nl_incl_vat"] = f"{p:.2f}"
-            df.at[i, "source_url"] = url
-            low = float(r["price_nl_lowest_incl_vat"]) if r["price_nl_lowest_incl_vat"] else None
-            if low is None or p < low:
-                df.at[i, "price_nl_lowest_incl_vat"] = f"{p:.2f}"
-                df.at[i, "price_nl_lowest_date"] = TODAY
-            df.at[i, "retrieved_at"] = TODAY
-            n += 1
+        de = collect(r["shop_urls_de"], r["id"])
         if r["idealo_url"]:
             try:
                 p = find_price(get(r["idealo_url"]))
                 if p:
-                    df.at[i, "price_de_excl_vat"] = f"{p:.2f}"
+                    de.append((p, r["idealo_url"]))
             except Exception as e:
                 errors.append(f"{r['id']} idealo: {e}")
+        for found, price_col, ref_col, bf in ((nl, "price_nl_incl_vat", "price_nl_ref_incl_vat", "price_blackfriday_nl"),
+                                              (de, "price_de_excl_vat", "price_de_ref_excl_vat", "price_blackfriday_de")):
+            # A new Black Friday season starts clean.
+            if r[f"{bf}_date"] and r[f"{bf}_date"] < w0.isoformat() and not force_blackfriday:
+                for c in (f"{bf}_incl_vat" if "nl" in bf else f"{bf}_excl_vat", f"{bf}_date", f"{bf}_source"):
+                    df.at[i, c] = ""
+            if not found:
+                continue
+            p, url = min(found)
+            if in_bf:
+                bf_col = f"{bf}_incl_vat" if "nl" in bf else f"{bf}_excl_vat"
+                old = float(df.at[i, bf_col]) if df.at[i, bf_col] else None
+                if old is None or p < old:
+                    df.at[i, bf_col] = f"{p:.2f}"
+                    df.at[i, f"{bf}_date"] = tstr
+                    df.at[i, f"{bf}_source"] = url
+                    deals += 1
+            else:
+                df.at[i, ref_col] = f"{p:.2f}"          # last normal price before the window
+            df.at[i, price_col] = f"{p:.2f}"
+            if price_col == "price_nl_incl_vat":
+                df.at[i, "source_url"] = url
+                low = float(r["price_nl_lowest_incl_vat"]) if r["price_nl_lowest_incl_vat"] else None
+                if low is None or p < low:
+                    df.at[i, "price_nl_lowest_incl_vat"] = f"{p:.2f}"
+                    df.at[i, "price_nl_lowest_date"] = tstr
+            df.at[i, "retrieved_at"] = tstr
+            n += 1
     if n:
         df.to_csv(path, index=False)
-    return f"{n} batteries priced" + (f"; errors: {'; '.join(errors)}" if errors else "")
+    msg = f"{n} prices updated" + (f"; Black Friday mode: {deals} deal prices recorded" if in_bf else "")
+    return msg + (f"; errors: {'; '.join(errors)}" if errors else "")
 
 
 SCRAPERS = {"prices": scrape_dayahead, "taxes": scrape_taxes, "batteries": scrape_battery_prices}
@@ -236,12 +321,14 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="battery_calc.scrape")
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--only", default=",".join(SCRAPERS))
+    ap.add_argument("--blackfriday", action="store_true", help="record current prices as Black Friday deals")
     args = ap.parse_args(argv)
     cfg = load_config(args.config)
     log = []
     for name in args.only.split(","):
         try:
-            msg = SCRAPERS[name](cfg)
+            msg = (SCRAPERS[name](cfg, force_blackfriday=args.blackfriday) if name == "batteries"
+                   else SCRAPERS[name](cfg))
             log.append({"scraper": name, "ok": True, "message": msg, "at": TODAY})
         except Exception as e:  # a failed scrape never touches the existing file
             log.append({"scraper": name, "ok": False, "message": str(e), "at": TODAY})

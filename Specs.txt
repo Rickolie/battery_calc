@@ -387,14 +387,28 @@ For the chosen battery (11.6) on the cheapest dynamic contract (or the current c
 - A dot marks the net saving. Years follow the rules of that year (2026 saldering, 2027–2029, 2030+) and shrink with capacity fade.
 - Values use the average of the last 3 price years.
 
-### 11.5 Black Friday price variants
+### 11.5 Black Friday deals (scraped) and estimate
 
-Two extra price variants, NL and DE, added as rows in Objective 1 and Objective 3:
+Goal: a quick, well-founded purchase decision during Black Friday.
 
-- Real deal prices are entered per battery (`price_blackfriday_nl_incl_vat`, `price_blackfriday_de_excl_vat`).
-- Until real deal prices are entered, the variant uses a configurable discount on the current price (default 15%) and is labelled "(est.)".
-- The DE variant without a known German price uses the NL price without VAT, minus the discount, plus the travel/shipping cost (section 4 caveats on 0% VAT apply).
-- Discounts and the Black Friday date (2026-11-27) are in `config.yaml` (`blackfriday`) and editable in the web settings.
+**Scraper.** `scrape.yml` runs every 4 hours inside the Black Friday window (`blackfriday.window`, default 20 November – 1 December) and weekly otherwise.
+
+- **NL prices (incl. VAT)** come from `shop_urls`: thuisbatterij.nl (including the variation endpoint), 123accu.nl, and Dutch Shopify manufacturer shops (e.g. nl.jackery.com).
+- **DE prices (0% VAT)** come from `shop_urls_de`: German Shopify manufacturer shops (zendure.de, de.ecoflow.com, de.jackery.com).
+- **Shopify stores** are read through their public `/products/<handle>.js`. Variants are matched with tokens (`text`, `!exclude`, `=exact`) and sold-out variants are skipped.
+- **Outside the window**, each scrape stores the current price as the reference (`price_nl_ref_incl_vat`, `price_de_ref_excl_vat`).
+- **Inside the window**, the lowest price seen is stored as the deal (`price_blackfriday_nl_incl_vat` / `_de_excl_vat`) with date and shop. The reference is left untouched, so the discount is real.
+- **A new season** (a deal dated before this year's window) starts clean.
+- **Price comparison sites** (Geizhals, idealo) and Tweakers block automated requests and are not used.
+
+**Report.**
+- Payback rows "NL Black Friday" / "DE Black Friday" appear for real deals. The estimate rows "NL/DE Black Friday (est.)" are always shown, using a configurable discount (default 15%; DE without a German price uses the NL price without VAT). DE rows add the travel/shipping cost.
+- A "Black Friday quick decision" table lists per battery, sorted by the best available payback:
+  - its best contract and strategy;
+  - today's price and payback;
+  - the deal price, discount and payback;
+  - the estimate;
+  - when and where the deal was found.
 
 ### 11.6 Objective 4: pottery kiln on free power
 
