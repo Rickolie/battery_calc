@@ -325,3 +325,118 @@ Build in steps, each producing visible output before the next starts:
 
 - Budget ceiling or maximum capacity to consider?
 - Is the repo public? If so, is it fine that Rick's P1 data is downloadable from the site, or should the "Rick's data" option load from a private source?
+
+## 11. Additions (2026-10-05)
+
+These additions extend the report and the web interface. Everything below runs in the same Python package, so the CLI and the website show the same numbers.
+
+### 11.1 Minimum price difference worth charging
+
+For each battery, the smallest all-in price difference between charging and discharging that pays for round-trip losses and wear:
+
+```
+min_difference = charge_price × (1/RTE − 1) + wear_cost        [€/kWh, all-in]
+```
+
+- Shown for charge prices €0.00, €0.10, €0.20 and €0.30, and as a ready-to-use setting for a typical cheap hour: the average of each day's 4 cheapest hours on the cheapest dynamic contract, 2027–2029 rules, last 3 years.
+- The setting is given twice: all-in, for apps that compare prices incl. taxes, and spot (= all-in ÷ (1 + VAT)), for apps that compare EPEX prices. Energy tax and supplier markup are the same every hour, so only VAT scales the difference.
+- This is the value to enter as `min_delta` in Home Battery Control or as the price-difference setting in a battery app.
+- Recomputed with the simulated cycles per year (section 8 of the report).
+
+### 11.2 Power profile
+
+A section after data quality:
+
+- Import and export power from the 15-min meter data: hours per year, median, p90, p99 and maximum kW.
+- For battery powers 0.8, 1.2, 1.6, 2.4, 3.0, 3.6 and 4.6 kW: the share of the yearly solar surplus a battery of that power can store, and the share of the import it can cover.
+- Per-phase peaks from the P1 columns `L1/L2/L3 max W` when present (configurable in `p1.phase_max_columns`).
+- A power-duration chart (hours per year above each power, for import and export) with the 0.8 kW socket limit and 2.4 kW marked.
+
+### 11.3 Solar charging when the grid is off
+
+Goal: when the grid fails or the main house switch is off, the battery should form its own small grid so solar power can still charge it. Continuous power for the house is not required, and a backup socket for appliances is not the goal.
+
+Two battery fields:
+
+| Field | Meaning |
+| --- | --- |
+| `outage_solar` | Can solar power keep charging the battery without the grid? `yes: DC panels on the battery` = panels on the battery's own MPPT inputs; `yes: … micro-inverter on the backup port` = an AC micro-inverter with panels on the battery's backup output; `not stated` = the shop only mentions a backup socket for devices; empty = unknown. |
+| `dc_solar_input_w` | Total DC solar input (MPPT) on the battery, in W. |
+
+Notes shown in the report:
+
+- The existing roof inverter is connected to the house wiring and switches off when the grid is gone (anti-islanding). To keep it producing, an installer would have to fit:
+  - a battery inverter that forms the grid for the house wiring;
+  - an automatic transfer switch that separates the house from the public grid;
+  - a solar inverter that follows frequency-shift power control, so it stops when the battery is full.
+- No plug-in battery in the dataset offers this.
+- Plug-in batteries that do keep charging from solar during an outage do so through their own solar input. In the current dataset that is the Indevolt PowerFlex/SolidFlex 2000 hybrid series (4 MPPT inputs, 2400 W). The shop states that the PowerFlex 2000 also accepts a micro-inverter on its backup port. Those panels must be wired to the battery, not to the roof inverter.
+- `backup_socket_w` (power of the backup socket) stays in the data for information but is not reported.
+
+### 11.4 Yearly earnings per strategy (stacked)
+
+For the chosen battery (11.6) on the cheapest dynamic contract (or the current contract without price history):
+
+- One panel per strategy, one stacked bar per year of ownership from the purchase date to end of life.
+- Bar segments:
+  - avoided import (discharge to the house × import price)
+  - sold to grid (discharge to the grid × feed-in price)
+  - feed-in given up for stored solar (negative)
+  - grid charging cost (negative)
+  - standby / other (negative): standby, saldering netting and feed-in tiers; closes the segments to the real saving
+- A dot marks the net saving. Years follow the rules of that year (2026 saldering, 2027–2029, 2030+) and shrink with capacity fade.
+- Values use the average of the last 3 price years.
+
+### 11.5 Black Friday price variants
+
+Two extra price variants, NL and DE, added as rows in Objective 1 and Objective 3:
+
+- Real deal prices are entered per battery (`price_blackfriday_nl_incl_vat`, `price_blackfriday_de_excl_vat`).
+- Until real deal prices are entered, the variant uses a configurable discount on the current price (default 15%) and is labelled "(est.)".
+- The DE variant without a known German price uses the NL price without VAT, minus the discount, plus the travel/shipping cost (section 4 caveats on 0% VAT apply).
+- Discounts and the Black Friday date (2026-11-27) are in `config.yaml` (`blackfriday`) and editable in the web settings.
+
+### 11.6 Objective 4: pottery kiln on free power
+
+After a battery is chosen (web dropdown, `--battery`, or `chosen_battery` in the config; default = fastest headline payback):
+
+- For kiln rated powers 1.5–11 kW, count the days per year on which one firing to maximum temperature (about 1250–1300 °C) can run on solar surplus plus the battery. A firing counts as free when at most 5% of its energy comes from the grid. The count is made with and without the battery.
+- Assumptions, configurable in `kiln` because they differ per kiln:
+  - a firing takes `firing_hours` (default 8 h)
+  - the kiln draws on average `avg_duty` × rated power (default 70%)
+  - energy per firing = kW × hours × duty
+  - start hour chosen per day between 06:00 and 11:00
+  - at most one firing per day
+- The battery starts each day with the charge it would have had under normal self-consumption. Grid energy is counted as the extra import compared with the same day without the kiln.
+- Kilns above 3.68 kW need a three-phase or high-current group; on a single-phase connection they are left out.
+- Output:
+  - a chart of free firing days against kiln power (with energy per firing)
+  - a table with average grid kWh and cost per firing
+  - free days per month (mostly April–September)
+  - a note that surplus is not fully free from 2027, because storing or using it gives up the feed-in compensation
+
+### 11.7 Web interface settings
+
+Step 3 adds:
+
+- battery set: shortlist (10 batteries, `battery_shortlist` in the config) or all
+- the chosen battery
+- the Black Friday discounts for NL and DE
+- the kiln firing hours and average power share
+
+The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kiln-duty`.
+
+### 11.8 Decisions since the first version
+
+- **Prices and contracts:**
+  - Day-ahead price history comes from the jeroen.nl files in `data/`, read via their UTC column.
+  - Contracts come from energievergelijk.nl: 23 dynamic suppliers, prices taken as incl. VAT, no feed-in costs (confirmed by Rick).
+  - The one-off switch bonus is counted once over the contract term, not every year.
+- **Battery prices:**
+  - Sources: thuisbatterij.nl and 123accu.nl, scraped weekly, plus Rick's comparison table "Plug-in thuisbatterij tot 7 kWh". The lowest price wins.
+  - Prices without an extra P1 meter, because Rick already has a HomeWizard P1 meter.
+- **Battery specs:** round-trip efficiency and standby use are not published by the shops. They use the defaults (85%, 10 W) and are marked "estimated".
+- **Strategies:**
+  - Home Battery Control's Dynamic strategy (Extreme-Pair Matching) is simulated as-is (`hbc_default`, `hbc_pv_first`).
+  - The simulator's own Dynamic strategy adds peak reservation, which needs custom control.
+- **Run time:** battery runs use the cheapest dynamic contract (`payback_top_dynamic_contracts`).
