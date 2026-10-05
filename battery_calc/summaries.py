@@ -110,6 +110,7 @@ def _savings(df):
     if col is None:
         return None
     d = df[df.analysis == "headline"] if "analysis" in df else df
+    d = d[d.strategy != "perfect_foresight"]          # only achievable strategies
     r = _best(d, col, low=False)
     return f"Largest saving from 2027: {r.battery} with {r.strategy} on {r.contract}, {_e(r[col])} a year."
 
@@ -147,7 +148,7 @@ def _blackfriday(df):
 
 
 def _earnings(df):
-    y = df.groupby("strategy").net_saving.sum().sort_values(ascending=False)
+    y = df[df.strategy != "perfect_foresight"].groupby("strategy").net_saving.sum().sort_values(ascending=False)
     return f"Over the battery's life {y.index[0]} earns most: {_e(y.iloc[0])} in total."
 
 

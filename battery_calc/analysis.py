@@ -1384,7 +1384,7 @@ class Analysis:
     def size_class_text(classes: pd.DataFrame) -> str:
         best_npv = classes.loc[classes.npv_eur.idxmax()]
         fastest = classes.loc[classes.payback_years.idxmin()]
-        lines = ["**Which size?** The best-value battery per size class (fastest payback within the class):"]
+        lines = ["", "**Which size?** The best-value battery per size class (fastest payback within the class):"]
         for r in classes.itertuples():
             s = (f"- **{r.size_class}:** {r.battery}, €{r.price_eur:,.0f}, saves €{r.saving_eur_year_2027:,.0f}/yr "
                  f"with `{r.strategy}`, pays back in {r.payback_years:.1f} years, net present value €{r.npv_eur:,.0f}")
