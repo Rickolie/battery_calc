@@ -337,6 +337,14 @@ def test_full_run_both_regimes_and_analyses(tmp_path):
     missing = [(name, c) for s in secs.values() for name, df in s.tables.items()
                for c in shown_columns(df) if describe(c, name) is None]
     assert not missing, missing
+    # every printed table has a one-line finding, and sections render collapsed
+    from battery_calc.report import section_html
+    from battery_calc.summaries import summarize
+    no_finding = [name for s in secs.values() for name, df in s.tables.items()
+                  if name not in s.csv_only and not df.empty and not summarize(name, df)]
+    assert not no_finding, no_finding
+    h = section_html(secs["payback"])
+    assert "<details class='sec'>" in h and "<details class='tblw'>" in h
 
 
 def test_hbc_extreme_pair_matching():

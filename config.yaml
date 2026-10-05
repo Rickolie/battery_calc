@@ -129,6 +129,9 @@ analysis:
   discount_rate: 0.03
   horizon_years: 20
   payback_top_dynamic_contracts: 1   # battery runs on the cheapest N dynamic contracts (they differ only in markup)
+  # Advice: best-value battery per capacity class (nominal kWh, centre ± halfwidth)
+  size_classes_kwh: [5, 10, 15]
+  size_class_halfwidth_kwh: 2.5
 
 battery_defaults:
   rte: 0.85
@@ -215,8 +218,9 @@ blackfriday:
 chosen_battery: null
 # Batteries simulated in a run: all, shortlist, or a list of ids.
 battery_set: all
-battery_shortlist: [marstek_v3_5, marstek_v3_5_plug, marstek_v3_10, marstek_venus_a_4, anker_max_7,
-                    ecoflow_stream_5, indevolt_sf3000_5, hoymiles_4020, homewizard_2_7, zendure_2400acplus_5]
+battery_shortlist: [marstek_v3_5, marstek_v3_5_plug, marstek_v3_10, marstek_v3_15, marstek_venus_a_4, anker_max_7,
+                    anker_max_14, ecoflow_stream_5, ecoflow_stream_10, indevolt_sf3000_5, hoymiles_4020,
+                    homewizard_2_7, zendure_2400acplus_5]
 
 # Objective 4: pottery kiln on free power (Specs.txt 11.6). Assumptions, edit
 # to the kiln's data sheet: a firing to maximum temperature (~1250-1300 C)

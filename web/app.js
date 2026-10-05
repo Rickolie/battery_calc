@@ -150,7 +150,7 @@ function onSection(sec) {
     state.csv[name] = csv;
     links.appendChild(downloadLink(name, csv, "text/csv"));
   }
-  div.querySelector("section").appendChild(links);
+  (div.querySelector("section .secbody") || div.querySelector("section")).appendChild(links);
   // The recommendation goes to the top; everything else in order of arrival.
   if (sec.id === "advice") $("results").prepend(div); else $("results").appendChild(div);
   if (window.renderInteractiveCharts) window.renderInteractiveCharts(div);

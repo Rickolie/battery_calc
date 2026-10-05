@@ -7,6 +7,14 @@ import re
 
 GLOSSARY = {
     # ------------------------------------------------------------ general
+    "size_class": "Capacity class: nominal capacity within ± the half-width of the class centre.",
+    "nominal_kwh": "Nominal (advertised) capacity in kWh.",
+    "candidates": "How many simulated batteries fall in this size class.",
+    "extra_saving_vs_smaller": "Extra yearly saving from 2027 compared with the best battery of the next smaller "
+                               "class (€).",
+    "extra_price_vs_smaller": "Extra purchase price compared with the best battery of the next smaller class (€).",
+    "payback_of_extra_years": "Years for the extra saving to earn back the extra price of stepping up a class "
+                              "('never' if it saves nothing extra).",
     "battery": "Brand and model of the battery configuration (capacity in the name).",
     "battery_id": "Short code of the battery in data/online/batteries.csv.",
     "id": "Short code of the battery in data/online/batteries.csv.",
