@@ -431,11 +431,15 @@ def plan_hbc(index: pd.DatetimeIndex, price: np.ndarray, cfg: dict) -> np.ndarra
 
 
 def perfect_foresight(net: np.ndarray, u: np.ndarray, s: np.ndarray, b: Battery, power_cap_w: float,
-                      wear: float = 0.0, levels: int = 21) -> SimResult:
+                      wear: float = 0.0, levels: int = 21, grid_charge: bool = True, sell: bool = True) -> SimResult:
     """Upper bound on bill savings: all prices and flows known in advance.
     Solved exactly as a linear programme (HiGHS); falls back to a discretised
     dynamic programme when scipy is unavailable. No degradation inside the year.
-    `wear` defaults to 0 so the result bounds the bill saving of every strategy."""
+    `wear` defaults to 0 so the result bounds the bill saving of every strategy.
+    `grid_charge=False` / `sell=False` restrict the battery to solar surplus /
+    the house's own load (used to show where the upper bound's value comes from)."""
+    if not (grid_charge and sell):
+        return _perfect_lp(net, u, s, b, power_cap_w, wear, grid_charge=grid_charge, sell=sell)
     try:
         return _perfect_lp(net, u, s, b, power_cap_w, wear)
     except ImportError:
@@ -443,7 +447,7 @@ def perfect_foresight(net: np.ndarray, u: np.ndarray, s: np.ndarray, b: Battery,
 
 
 def _perfect_lp(net, u, s, b: Battery, power_cap_w: float, wear: float,
-                window: int = 96 * 7, lookahead: int = 96) -> SimResult:
+                window: int = 96 * 7, lookahead: int = 96, grid_charge: bool = True, sell: bool = True) -> SimResult:
     """Weekly windows with one day of look-ahead, carrying the state of charge
     (≈3× faster than one year-long LP, within a fraction of a percent of it)."""
     import scipy.optimize  # noqa: F401  (ImportError -> DP fallback)
@@ -454,7 +458,7 @@ def _perfect_lp(net, u, s, b: Battery, power_cap_w: float, wear: float,
     for a in range(0, n, window):
         z = min(a + window + lookahead, n)
         keep = min(window, n - a)
-        c, d, soc = _lp_window(net[a:z], u[a:z], s[a:z], b, power_cap_w, wear, soc0)
+        c, d, soc = _lp_window(net[a:z], u[a:z], s[a:z], b, power_cap_w, wear, soc0, grid_charge, sell)
         c_all[a:a + keep], d_all[a:a + keep], soc_all[a:a + keep] = c[:keep], d[:keep], soc[:keep]
         soc0 = soc[keep - 1]
     eta = math.sqrt(b.rte)
@@ -465,15 +469,17 @@ def _perfect_lp(net, u, s, b: Battery, power_cap_w: float, wear: float,
                      d_all.sum() / eta / cap if cap else 0.0, cap, soc_all, c_all - d_all)
 
 
-def _lp_window(net, u, s, b: Battery, power_cap_w: float, wear: float, soc0: float):
+def _lp_window(net, u, s, b: Battery, power_cap_w: float, wear: float, soc0: float,
+               grid_charge: bool = True, sell: bool = True, steps: int = 1):
+    """`steps` = quarter-hours per LP interval (4 plans on an hourly grid)."""
     from scipy.optimize import linprog
     from scipy.sparse import coo_matrix
 
     eta = math.sqrt(b.rte)
-    p_ch = min(b.max_charge_w, power_cap_w) / 1000.0 * DT_H
-    p_dis = min(b.max_discharge_w, power_cap_w) / 1000.0 * DT_H
+    p_ch = min(b.max_charge_w, power_cap_w) / 1000.0 * DT_H * steps
+    p_dis = min(b.max_discharge_w, power_cap_w) / 1000.0 * DT_H * steps
     cap = b.usable_kwh
-    sb = (b.standby_w or 0.0) / 1000.0 * DT_H
+    sb = (b.standby_w or 0.0) / 1000.0 * DT_H * steps
     L = np.asarray(net, dtype=float) + sb
     n = len(L)
     u = np.asarray(u, dtype=float)
@@ -500,11 +506,97 @@ def _lp_window(net, u, s, b: Battery, power_cap_w: float, wear: float, soc0: flo
     ub[idx(C)] = p_ch
     ub[idx(D)] = p_dis
     ub[idx(S)] = cap
+    if not grid_charge:
+        ub[idx(C)] = np.minimum(p_ch, np.maximum(-L, 0.0))
+    if not sell:
+        ub[idx(D)] = np.minimum(p_dis, np.maximum(L, 0.0))
     res = linprog(cost, A_eq=A, b_eq=rhs, bounds=np.column_stack([lb, ub]), method="highs")
     if not res.success:
         raise RuntimeError(f"perfect-foresight LP failed: {res.message}")
     x = res.x
     return x[idx(C)], x[idx(D)], x[idx(S)]
+
+
+def plan_forecast(index: pd.DatetimeIndex, net: np.ndarray, u: np.ndarray, s: np.ndarray, b: Battery,
+                  power_cap_w: float, wear: float, cfg: dict | None = None,
+                  forecast: np.ndarray | None = None) -> np.ndarray:
+    """Forecast optimiser (model-predictive control, like EMHASS in Home Assistant).
+
+    Every day at `replan_hour` (13:00, when tomorrow's day-ahead prices are
+    published) solve the same linear programme as perfect foresight, but over
+    the prices actually known then (until the end of tomorrow) and a forecast
+    of the house's net load: the mean of the last `forecast_days` days at the
+    same quarter-hour (persistence). The plan is executed until the next
+    replan as battery modes, so the real load and solar decide the flows:
+    - planned grid charge → charge; planned discharge beyond the load → sell;
+    - load the plan leaves uncovered → hold (still absorbs solar surplus);
+    - solar surplus the plan does not store → discharge-only (wait for a
+      cheaper export hour to absorb solar, e.g. negative midday prices);
+    - otherwise self-consumption.
+    Wear enters the plan as `wear_scale` × wear per kWh discharged. The plan
+    uses `plan_minutes` steps (hourly by default: as good on the forecast's
+    accuracy, and 3–4× faster than quarter-hours).
+    `forecast` replaces the persistence forecast (e.g. the real net load, to
+    measure what a perfect usage/solar forecast would be worth)."""
+    cfg = cfg or {}
+    days = int(cfg.get("forecast_days", 3))
+    tol = float(cfg.get("tolerance_kwh", 0.02))
+    hour = int(cfg.get("replan_hour", 13))
+    w = wear * float(cfg.get("wear_scale", 0.5))
+    steps = max(1, int(cfg.get("plan_minutes", 60)) // 15)
+    net = np.asarray(net, dtype=float)
+    u, s = np.asarray(u, dtype=float), np.asarray(s, dtype=float)
+    n = len(net)
+    modes = np.full(n, SELF, dtype=np.int64)
+    if n == 0:
+        return modes
+    day = np.asarray(index.normalize().asi8)
+    day_end = np.concatenate([np.flatnonzero(np.diff(day)) + 1, [n]])    # first index of the next day
+    nxt_end = lambda t: day_end[np.searchsorted(day_end, t, side="right")]  # noqa: E731
+    h, mi = np.asarray(index.hour), np.asarray(index.minute)
+    starts = [0] + [int(q) for q in np.flatnonzero((h == hour) & (mi == 0)) if q > 0]
+    soc = 0.0
+    for i, a in enumerate(starts):
+        z_exec = starts[i + 1] if i + 1 < len(starts) else n
+        z = int(nxt_end(a))                                  # end of today
+        if h[a] >= hour and z < n:
+            z = int(day_end[np.searchsorted(day_end, z, side="right")])  # tomorrow's prices are known
+        z = max(z, z_exec)
+        f = np.zeros(z - a)
+        k_used = 0
+        for j in range(1, days + 1):
+            if a - 96 * j < 0:
+                break
+            src = np.arange(a, z) - 96 * j
+            f += net[np.minimum(src, n - 1)]
+            k_used += 1
+        if k_used:
+            f /= k_used
+        if forecast is not None:
+            f = np.asarray(forecast[a:z], dtype=float)
+        k = steps
+        pad = (-len(f)) % k
+        blk = lambda x, red: red(np.concatenate([x, np.repeat(x[-1:], pad)]).reshape(-1, k), axis=1)  # noqa: E731
+        fb, ub, sbk = blk(f, np.sum), blk(u[a:z], np.mean), blk(s[a:z], np.mean)
+        cc, dd, _ = _lp_window(fb, ub, sbk, b, power_cap_w, w, soc, steps=k)
+        m_len = z_exec - a
+        nb = -(-m_len // k)
+        L, ch, dis = fb[:nb], cc[:nb], dd[:nb]
+        sur, load = np.maximum(-L, 0.0), np.maximum(L, 0.0)
+        tl = tol * k
+        hold = (load > tl) & (dis < tl / 2)
+        no_store = (sur > tl) & (ch < tl / 2)
+        seg = np.full(nb, SELF, dtype=np.int64)
+        seg[hold & ~no_store] = CHARGE_PV
+        seg[no_store & ~hold] = ZERO_IMPORT
+        seg[hold & no_store] = IDLE
+        seg[ch > sur + tl] = GRID_CHARGE
+        seg[dis > load + tl] = FULL_DISCHARGE
+        seg = np.repeat(seg, k)[:m_len]
+        modes[a:z_exec] = seg
+        r = simulate(net[a:z_exec], seg, b, power_cap_w, soc0=soc, keep_trace=True, degrade=False)
+        soc = float(r.soc[-1])
+    return modes
 
 
 def _perfect_dp(net: np.ndarray, u: np.ndarray, s: np.ndarray, b: Battery, power_cap_w: float,

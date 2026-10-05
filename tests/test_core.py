@@ -13,8 +13,8 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.dirname(__file__))
 
 from battery_calc.analysis import Analysis, Inputs, Options  # noqa: E402
-from battery_calc.battery import (SELF, Battery, perfect_foresight, plan_dynamic,  # noqa: E402
-                                  simulate)
+from battery_calc.battery import (FULL_DISCHARGE, GRID_CHARGE, SELF, Battery, perfect_foresight,  # noqa: E402
+                                  plan_dynamic, plan_forecast, simulate)
 from battery_calc.breakeven import breakeven, lifetime_kwh, wear_cost  # noqa: E402
 from battery_calc.config import Connection, load_config  # noqa: E402
 from battery_calc.contracts import Contract, parse_vast  # noqa: E402
@@ -232,6 +232,34 @@ def test_perfect_foresight_bounds_heuristics():
                    degrade=False)
     assert cost(lp) <= cost(sc) + 1e-6
     assert cost(lp) <= cost(dyn) + 1e-6
+    fc = simulate(net, plan_forecast(idx, net, u, s, b, 4600, wear=0.0), b, 4600, degrade=False)
+    assert cost(lp) <= cost(fc) + 1e-6
+    # restricted bounds: fewer freedoms never earn more
+    solar_only = perfect_foresight(net, u, s, b, 4600, grid_charge=False, sell=False)
+    assert cost(lp) <= cost(solar_only) + 1e-6
+    assert np.all(solar_only.batt_ac <= np.maximum(-net, 0) + 1e-7)   # charges only from surplus
+
+
+def test_forecast_optimiser_uses_known_prices_and_beats_self_consumption():
+    """A repeating day with a cheap night and an expensive evening: the
+    optimiser charges at night and sells/covers the evening, and with a
+    perfect forecast it matches perfect foresight closely."""
+    b = make_battery(standby_w=0.0)
+    days = 14
+    idx = pd.date_range("2025-03-01", periods=96 * days, freq="15min", tz="UTC")
+    h = np.asarray(idx.hour)
+    net = np.where((h >= 17) & (h < 22), 0.4, 0.05)
+    u = np.where(h < 6, 0.10, np.where((h >= 17) & (h < 22), 0.45, 0.25))
+    s = u - 0.12
+    cost = lambda r: float((u * r.imp - s * r.exp).sum())  # noqa: E731
+    modes = plan_forecast(idx, net, u, s, b, 4600, wear=0.0)
+    fc = simulate(net, modes, b, 4600, degrade=False)
+    sc = simulate(net, SELF, b, 4600, degrade=False)
+    lp = perfect_foresight(net, u, s, b, 4600)
+    assert (modes[h < 6] == GRID_CHARGE).any()
+    assert not (modes == FULL_DISCHARGE)[h < 6].any()
+    assert cost(fc) < cost(sc) - 1.0
+    assert cost(fc) - cost(lp) <= 0.05 * (cost(sc) - cost(lp))     # within 5% of the bound's gain
 
 
 def test_breakeven_lossless_infinite_life_equals_charge_price():

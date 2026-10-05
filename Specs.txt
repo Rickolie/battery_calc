@@ -476,3 +476,24 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - a static daily chart with a legend.
 - **Zoomable charts:** uPlot (MIT licence), bundled in `battery_calc/static/`, so no external requests are made. Drag to zoom, double-click to reset, click a legend item to hide a series. The same charts are embedded in the downloadable HTML report; Markdown reports keep PNG charts.
 - **German prices:** besides Zendure, EcoFlow and Jackery, the scraper now reads the German Shopify shops of Marstek (marstek.de), Anker SOLIX (de.ankersolix.com), Hoymiles (de.hoymiles.com) and Indevolt (de.indevolt.com). `a++b` in `shop_urls_de` adds up separately sold parts (base unit + expansion module). Batteries without a German shop for that exact configuration (Marstek Venus E 4.0/Max, AEG, HomeWizard) or sold out stay empty.
+
+### 11.10 Forecast optimiser and the gap to perfect foresight (2026-10-05)
+
+- **New strategy `forecast`** (dynamic contracts, custom control; Home Assistant can do this with EMHASS):
+  - Every day at 13:00, when tomorrow's day-ahead prices are published, solve the perfect-foresight LP over the prices known then (until the end of tomorrow).
+  - Usage and solar come from a persistence forecast: the mean of the last 3 days at the same quarter-hour, or a real solar forecast when one is available.
+  - Wear enters the plan at 0.5 × the battery's wear per kWh. This was tuned on 2023–2025: 0 cycles too much, 1.0 too little.
+  - The plan is executed as battery modes until the next re-plan, so the measured flows decide what happens:
+    - planned grid charge → charge;
+    - planned discharge beyond the load → sell;
+    - load the plan leaves uncovered → hold;
+    - solar surplus the plan does not store → discharge-only, so solar is absorbed in cheaper (often negative-price) export hours;
+    - otherwise self-consumption.
+  - LP-based, so it runs on the headline years only, like `perfect_foresight`.
+- **Gap table** (section 7, chosen battery, cheapest dynamic contract, 2027–2029 rules). Every row adds or removes one piece of knowledge or freedom:
+  - self_consumption, timed, dynamic, dynamic_sell, forecast;
+  - forecast with a perfect usage/solar forecast;
+  - perfect foresight restricted to solar only without selling, solar only with selling, and grid charging without selling;
+  - full perfect foresight.
+- **Answer to "sell the rest at dinner time":** the optimiser already sells when that pays. Perfect foresight shows that selling stored solar adds little for this household, because the battery is nearly empty by sunrise. Most of the gap is timing: when to absorb solar and when to use it. That depends on predicting the household's own solar and usage.
+- **Timed vs Dynamic:** the Timed windows are searched on the last headline year and evaluated on it too (in-sample). Its grid charging ignores wear. The gap table shows per year where Timed wins.

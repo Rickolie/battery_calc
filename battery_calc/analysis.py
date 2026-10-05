@@ -14,7 +14,7 @@ import pandas as pd
 
 from . import charts, extras
 from .battery import (GRID_CHARGE, SELF, ZERO_IMPORT, Battery, in_scope, load_batteries, perfect_foresight,
-                      plan_dynamic, plan_hbc, plan_timed, simulate)
+                      plan_dynamic, plan_forecast, plan_hbc, plan_timed, simulate)
 from .breakeven import breakeven_rows, wear_cost
 from .config import Connection, resolve
 from .contracts import Contract, load_contracts_csv, parse_vast, read_text
@@ -773,7 +773,8 @@ class Analysis:
         out = [s for s in enabled if s in ("self_consumption", "timed")]
         if c.is_dynamic:
             presets = self.cfg.get("strategies", {}).get("hbc_presets", {}) or {}
-            out += [s for s in enabled if s in ("dynamic", "dynamic_sell", "perfect_foresight") or s in presets]
+            out += [s for s in enabled
+                    if s in ("dynamic", "dynamic_sell", "forecast", "perfect_foresight") or s in presets]
         return out
 
     def sim_strategy(self, strategy, b, cap, per: Period, idx, c, scn, wear, windows=None, scale=1.0,
@@ -798,6 +799,9 @@ class Analysis:
         presets = self.cfg.get("strategies", {}).get("hbc_presets", {}) or {}
         if strategy in presets:
             return simulate(net, plan_hbc(idx, u, presets[strategy]), bb, cap, keep_trace=keep_trace)
+        if strategy == "forecast":
+            modes = plan_forecast(idx, net, u, s, bb, cap, wear, self.cfg.get("strategies", {}).get("forecast", {}))
+            return simulate(net, modes, bb, cap, keep_trace=keep_trace)
         if strategy == "perfect_foresight":
             lv = self.cfg.get("strategies", {}).get("perfect_foresight", {}).get("soc_levels", 21)
             return perfect_foresight(net, u, s, bb, cap, 0.0, lv)
@@ -887,8 +891,9 @@ class Analysis:
                     if strat == "timed" and not windows:
                         continue      # no window beats self-consumption: identical results
                     for scn in self.scenarios:
-                        years = self.head_years if strat == "perfect_foresight" else None
-                        if strat == "perfect_foresight" and self.opts.quick:
+                        lp = strat in ("perfect_foresight", "forecast")     # LP-based: headline years only
+                        years = self.head_years if lp else None
+                        if lp and self.opts.quick:
                             years = self.head_years[-1:]
                         for label, per, idx, _ in self.periods(c, scn, years):
                             r = self.sim_strategy(strat, b, cap, per, idx, c, scn, wear, windows=windows)
@@ -914,7 +919,9 @@ class Analysis:
               "priciest load. **Home Battery Control cannot do this reservation today**: `dynamic` needs custom "
               "control. `hbc_*` strategies reproduce Home Battery Control's Dynamic strategy exactly "
               "(Extreme-Pair Matching, presets in config.yaml), so those results are achievable as-is. "
-              "`perfect_foresight` is the upper bound (headline years only).",
+              "`forecast` re-plans every day at 13:00 over the prices known then (until tomorrow night) with a "
+              "usage/solar forecast from the last 3 days, the way EMHASS does in Home Assistant (custom control, "
+              "headline years only). `perfect_foresight` is the upper bound (headline years only).",
               "For fixed contracts there is one value (stated tariffs); for dynamic contracts the min–max is the "
               "payback across price years. Partial price years are excluded from the ranges."]
         if (self.prices is None):
@@ -971,6 +978,10 @@ class Analysis:
                           "ownership split into avoided import, energy sold, feed-in given up for stored solar, "
                           "grid charging cost, and standby/other (saldering netting, feed-in tiers). Bars stack to "
                           "the net saving (black dot); later years shrink as capacity fades.")
+            gap = self.strategy_gap(self.chosen, self.cheapest_dynamic(), meta)
+            if gap is not None and len(gap):
+                sec.tables[f"gap_to_perfect_foresight_{self.chosen.id}"] = gap.round(1)
+                md.append(self.gap_text(gap))
         sec.md = "\n".join(md)
         self.emit(sec)
         # Recompute Objective 1 with simulated cycles (best strategy per battery).
@@ -1096,6 +1107,97 @@ class Analysis:
         fig = self.fig(charts.earnings_stacked, tbl, f"{b.name} – {c.label}")
         return tbl, fig
 
+    def strategy_gap(self, b: Battery, c: Contract, meta) -> pd.DataFrame | None:
+        """Where the gap between the achievable strategies and perfect foresight
+        comes from (2027–2029 rules, headline years): the same optimiser with
+        less knowledge, and perfect foresight with fewer freedoms."""
+        if c is None or not c.is_dynamic:
+            return None
+        scn = "nosal_min50"
+        years = self.head_years[-1:] if self.opts.quick else self.head_years
+        pers = self.periods(c, scn, years)
+        if not pers:
+            return None
+        cap = self.conn.battery_cap_w(b.phases)
+        m = meta.get((b.id, c.id), {"windows": [], "wear": self.wear_for(b)[0]})
+        fit = self.head_years[-1] if self.head_years else ""
+        fcfg = self.cfg.get("strategies", {}).get("forecast", {})
+        rows = [
+            ("self_consumption", "nothing: store surplus, use it when the house imports", "self_consumption", {}),
+            ("timed", f"fixed windows, chosen on {fit} prices (that year is in-sample)", "timed", {}),
+            ("dynamic", "today's day-ahead prices + yesterday's usage", "dynamic", {}),
+            ("dynamic_sell", "same, may sell to the grid", "dynamic_sell", {}),
+            ("forecast", "day-ahead prices until tomorrow night + usage/solar of the last days", "forecast", {}),
+            ("forecast, perfect usage forecast", "same optimiser, but knows the real usage and solar in advance",
+             "oracle", {}),
+            ("bound: solar only, no selling", "everything in advance; stores only solar, covers only own load",
+             "pf", {"grid_charge": False, "sell": False}),
+            ("bound: solar only, may sell", "everything in advance; stores only solar, may sell it",
+             "pf", {"grid_charge": False}),
+            ("bound: grid charging, no selling", "everything in advance; may charge from the grid, no selling",
+             "pf", {"sell": False}),
+            ("perfect_foresight", "everything in advance, all freedoms", "pf", {}),
+        ]
+        out = []
+        for name, knows, kind, kw in rows:
+            if kind == "timed" and not m["windows"]:
+                continue
+            row = {"strategy": name, "knows": knows}
+            vals, cyc = [], []
+            for label, per, idx, _ in pers:
+                net = per.imp - per.exp
+                if kind == "pf":
+                    u, s = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
+                    r = perfect_foresight(net, u, s, b, cap, 0.0, **kw)
+                elif kind == "oracle":
+                    u, s = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
+                    r = simulate(net, plan_forecast(idx, net, u, s, b, cap, m["wear"], fcfg, forecast=net), b, cap)
+                else:
+                    r = self.sim_strategy(kind, b, cap, per, idx, c, scn, m["wear"], windows=m["windows"])
+                v = self.saving(r, per, c, scn)
+                row[f"eur_{label}"] = v
+                vals.append(v)
+                cyc.append(r.efc)
+            row["mean_eur"] = float(np.mean(vals))
+            row["cycles_per_year"] = float(np.mean(cyc))
+            out.append(row)
+        df = pd.DataFrame(out)
+        top = df.loc[df.strategy == "perfect_foresight", "mean_eur"]
+        if len(top):
+            df["gap_to_bound_eur"] = top.iloc[0] - df["mean_eur"]
+        return df
+
+    @staticmethod
+    def gap_text(gap: pd.DataFrame) -> str:
+        v = dict(zip(gap.strategy, gap.mean_eur))
+        g = lambda k: v.get(k, float("nan"))  # noqa: E731
+        ycols = [c for c in gap.columns if c.startswith("eur_")]
+        lines = ["**Why perfect foresight earns so much more** (chosen battery, cheapest dynamic contract, "
+                 "2027–2029 rules). Each row adds or removes one piece of knowledge or freedom:",
+                 f"- *Timing alone* is the biggest piece: storing only solar and only covering the house, perfect "
+                 f"knowledge still earns €{g('bound: solar only, no selling'):,.0f} vs €{g('self_consumption'):,.0f} "
+                 "for self-consumption, with about the same number of cycles. It absorbs solar in the cheapest "
+                 "(often negative) export hours instead of first thing in the morning, and keeps the energy for "
+                 "the most expensive hours.",
+                 f"- *Selling stored solar* adds only €{g('bound: solar only, may sell') - g('bound: solar only, no selling'):,.0f} "
+                 "per year: the battery is almost empty by the next morning, so there is rarely energy left to sell "
+                 "on top of the evening and night use.",
+                 f"- *Grid charging* adds €{g('bound: grid charging, no selling') - g('bound: solar only, no selling'):,.0f}; "
+                 "perfect foresight ignores wear, so part of that would not pay off for real.",
+                 f"- With the real day-ahead prices but a **perfect usage and solar forecast**, the optimiser reaches "
+                 f"€{g('forecast, perfect usage forecast'):,.0f}; with yesterday-style forecasts (`forecast`) "
+                 f"€{g('forecast'):,.0f}. So the gap is mostly about predicting the household's own solar and "
+                 "usage, not about prices. A good solar forecast (e.g. Forecast.Solar or Solcast in Home "
+                 "Assistant) is what closes it."]
+        if "timed" in v and len(ycols) > 1:
+            row = gap[gap.strategy == "timed"].iloc[0]
+            dyn = gap[gap.strategy == "dynamic"].iloc[0]
+            wins = [c[4:] for c in ycols if row[c] > dyn[c]]
+            lines.append(f"- `timed` beats `dynamic` in {', '.join(wins) if wins else 'no year'}: its windows are "
+                         f"picked on {ycols[-1][4:]} prices, so that year is in-sample. Its grid charging also ignores "
+                         "the battery's wear, which `dynamic` requires every charge to earn back.")
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------ 11.6 Objective 4
     def step_kiln(self):
         sec = Section("kiln", "9. Objective 4 – pottery kiln on free power")
@@ -1198,7 +1300,7 @@ class Analysis:
                   f"(€{row.eur_per_kwh_usable:,.0f} per usable kWh), net present value €{row.npv_eur:,.0f} over its life.")
         md.append(f"- **Saves about €{row.saving_eur_year_2027:,.0f} per year** from 2027 with strategy "
                   f"`{row.strategy}` on {row.contract}.")
-        if row.strategy in ("dynamic", "dynamic_sell", "timed"):
+        if row.strategy in ("dynamic", "dynamic_sell", "forecast", "timed"):
             simple = rec[(rec.battery_id == b.id) & (rec.contract_id == row._cid) & (rec.scenario == "nosal_min50")
                          & ~rec.partial & rec.price_year.isin(["profile"] + list(self.head_years))
                          & rec.strategy.isin(["self_consumption", "hbc_pv_first"])]

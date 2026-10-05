@@ -13,7 +13,9 @@ GLOSSARY = {
     "contract": "Electricity contract: supplier – product. 'Current contract – vast.txt' is your own fixed contract.",
     "strategy": "How the battery is controlled: self_consumption = store solar surplus, use it when the house "
                 "imports; timed = fixed daily charge/discharge windows; dynamic = day-ahead prices with peak "
-                "reservation (needs custom control); dynamic_sell = same, may also sell to the grid; hbc_default / "
+                "reservation (needs custom control); dynamic_sell = same, may also sell to the grid; forecast = daily "
+                "optimisation over the known day-ahead prices and a usage/solar forecast (like EMHASS in Home "
+                "Assistant, needs custom control); hbc_default / "
                 "hbc_pv_first = Home Battery Control's Dynamic strategy as-is; perfect_foresight = theoretical "
                 "upper bound with all prices and usage known in advance (not achievable).",
     "scenario": "Which rules are applied: 2026 (saldering), 2027–2029 (no saldering, at least 50% feed-in "
@@ -216,6 +218,7 @@ PATTERNS = [
     (r"at_charge_(\d+\.\d+)", "Minimum price difference worth charging when charging at €{0}/kWh: the discharge "
                               "price must be at least this much higher (all-in, €/kWh)."),
     (r"saving_(.+)", "Average yearly saving with the battery under the {0} (€)."),
+    (r"eur_(\d{4})", "Saving in price year {0} under 2027–2029 rules (€, wear not deducted)."),
     (r"^(\d{1,2})$", "Free firing days in month {0} (1 = January)."),
 ]
 
@@ -227,6 +230,12 @@ TABLE_OVERRIDES = [
     (r"import_export_power", {"max_kw": "Highest 15-minute average power measured (kW)."}),
     (r"peak_per_phase", {"max_kw": "Highest power peak on this phase (kW).",
                          "p99_kw": "Peak exceeded in only 1% of the quarter-hours on this phase (kW)."}),
+    (r"gap_to_perfect_foresight", {
+        "strategy": "Strategy, or a perfect-foresight variant with fewer freedoms ('bound: ...').",
+        "knows": "What the strategy knows when it decides.",
+        "mean_eur": "Average yearly saving over the price years shown (€).",
+        "cycles_per_year": "Full battery cycles per year.",
+        "gap_to_bound_eur": "How much less than perfect foresight it saves per year (€)."}),
     (r"monthly_flows", {"index": "Month (YYYY-MM) of the profile year."}),
 ]
 
