@@ -9,6 +9,7 @@ GLOSSARY = {
     # ------------------------------------------------------------ general
     "size_class": "Capacity class: nominal capacity within ± the half-width of the class centre.",
     "nominal_kwh": "Nominal (advertised) capacity in kWh.",
+    "avoided_negative_export": "Money saved by curtailing solar export in negative-price quarter-hours (€/yr).",
     "full_year": "True for a complete ownership year; the partial purchase year and partial last year are False.",
     "charged_kwh": "Energy put into the battery in the profile year (kWh, AC side).",
     "delivered_kwh": "Energy delivered by the battery in the profile year (kWh, AC side).",
@@ -31,7 +32,8 @@ GLOSSARY = {
                 "imports; timed = fixed daily charge/discharge windows; dynamic = day-ahead prices with peak "
                 "reservation (needs custom control); dynamic_sell = same, may also sell to the grid; forecast = daily "
                 "optimisation over the known day-ahead prices and a usage/solar forecast (like EMHASS in Home "
-                "Assistant, needs custom control); hbc_default / "
+                "Assistant, needs custom control); …_curtail = same strategy plus zero solar export (inverter scaled "
+                "back) in quarter-hours with a negative export price once the battery is full; hbc_default / "
                 "hbc_pv_first = Home Battery Control's Dynamic strategy as-is; perfect_foresight = theoretical "
                 "upper bound with all prices and usage known in advance (not achievable).",
     "scenario": "Which rules are applied: 2026 (saldering), 2027–2029 (no saldering, at least 50% feed-in "

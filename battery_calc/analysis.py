@@ -13,8 +13,8 @@ import numpy as np
 import pandas as pd
 
 from . import charts, extras
-from .battery import (GRID_CHARGE, SELF, ZERO_IMPORT, Battery, in_scope, load_batteries, perfect_foresight,
-                      plan_dynamic, plan_forecast, plan_hbc, plan_timed, simulate)
+from .battery import (GRID_CHARGE, SELF, ZERO_IMPORT, Battery, curtail, in_scope, load_batteries,
+                      perfect_foresight, plan_dynamic, plan_forecast, plan_hbc, plan_timed, simulate)
 from .breakeven import breakeven_rows, wear_cost
 from .report import slug
 from .config import Connection, resolve
@@ -833,7 +833,15 @@ class Analysis:
             presets = self.cfg.get("strategies", {}).get("hbc_presets", {}) or {}
             out += [s for s in enabled
                     if s in ("dynamic", "dynamic_sell", "forecast", "perfect_foresight") or s in presets]
+            # Curtailment only matters where export can be worth less than nothing (dynamic prices).
+            if "curtail" in enabled:
+                bases = self.cfg.get("strategies", {}).get("curtail", {}).get("bases", ["self_consumption", "forecast"])
+                out += [f"{s}_curtail" for s in bases if s in out]
         return out
+
+    @staticmethod
+    def base_strategy(strategy: str) -> str:
+        return strategy[:-len("_curtail")] if strategy.endswith("_curtail") else strategy
 
     def sim_strategy(self, strategy, b, cap, per: Period, idx, c, scn, wear, windows=None, scale=1.0,
                      rte=None, standby=None, keep_trace=False):
@@ -843,6 +851,11 @@ class Analysis:
             from dataclasses import replace
             bb = replace(b, rte=rte if rte is not None else b.rte,
                          standby_w=standby if standby is not None else b.standby_w)
+        if strategy.endswith("_curtail"):
+            r = self.sim_strategy(self.base_strategy(strategy), b, cap, per, idx, c, scn, wear, windows, scale,
+                                  rte, standby, keep_trace)
+            u, s = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
+            return curtail(r, s, float(self.cfg.get("strategies", {}).get("curtail", {}).get("below_eur_kwh", 0.0)))
         if strategy == "self_consumption":
             return simulate(net, SELF, bb, cap, keep_trace=keep_trace)
         u, s = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
@@ -949,7 +962,7 @@ class Analysis:
                     if strat == "timed" and not windows:
                         continue      # no window beats self-consumption: identical results
                     for scn in self.scenarios:
-                        lp = strat in ("perfect_foresight", "forecast")     # LP-based: headline years only
+                        lp = self.base_strategy(strat) in ("perfect_foresight", "forecast")   # LP: headline years
                         years = self.head_years if lp else None
                         if lp and self.opts.quick:
                             years = self.head_years[-1:]
@@ -992,6 +1005,11 @@ class Analysis:
                "usage/solar forecast from the last 3 days (like EMHASS in Home Assistant). Needs custom control. "
                "Last 3 price years only.",
                "- `hbc_default` / `hbc_pv_first`: Home Battery Control's Dynamic strategy as-is.",
+               "- `…_curtail` (`self_consumption_curtail`, `forecast_curtail`): the same strategy, but once the "
+               "battery is full (or at its power limit) the solar inverter scales back to zero export whenever "
+               "exporting has a negative value. `curtailed export = remaining export in quarter-hours where the "
+               "export price < 0`. Needs an inverter Home Assistant can control. Curtailing would also save money "
+               "without a battery, so part of this gain is not the battery's.",
                "- `perfect_foresight`: knows all prices and usage in advance – the upper limit, not achievable. "
                "Last 3 price years only.",
                "#### Ranges and assumptions",
@@ -1144,10 +1162,11 @@ class Analysis:
 
     # ------------------------------------------------------------------ size classes
     CLASS_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]          # validated categorical slots 1-3
-    EARN_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
+    EARN_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
     EARN_KEYS = [("avoided_import", "Avoided import"), ("sold_to_grid", "Sold to grid"),
                  ("solar_feed_in_given_up", "Feed-in given up (stored solar)"),
-                 ("grid_charging", "Grid charging"), ("standby_and_other", "Standby / other")]
+                 ("grid_charging", "Grid charging"), ("standby_and_other", "Standby / other"),
+                 ("avoided_negative_export", "Curtailed export (negative prices avoided)")]
 
     def size_classes(self):
         a = self.cfg.get("analysis", {})
@@ -1309,7 +1328,11 @@ class Analysis:
                 sv = self.saving(r, per, c, scn)
                 u, s_ = marginal_values(per, c, self.regimes[scn], self.taxes, self.net_importer)
                 sb = (b.standby_w or 0.0) / 1000.0 * 0.25
-                comp[(strat, scn)] = extras.earnings_split(per.imp - per.exp, r.batt_ac, sb, u, s_, sv)
+                parts = extras.earnings_split(per.imp - per.exp, r.batt_ac, sb, u, s_, sv)
+                cut = float((r.curtailed * -s_).sum()) if r.curtailed is not None else 0.0
+                parts["avoided_negative_export"] = cut
+                parts["standby_and_other"] -= cut
+                comp[(strat, scn)] = parts
                 efcs[(strat, scn)] = r.efc
         start = pd.Timestamp(self.cfg["analysis"]["purchase_date"])
         rows = []
@@ -1381,6 +1404,7 @@ class Analysis:
         ("dynamic", "today's day-ahead prices + yesterday's usage", "rec", {}),
         ("dynamic_sell", "same, may sell to the grid", "rec", {}),
         ("forecast", "prices until tomorrow night + usage/solar of the last 3 days", "rec", {}),
+        ("forecast_curtail", "forecast + solar export switched off at negative prices", "rec", {}),
         ("forecast, perfect usage forecast", "same optimiser, knows the real usage and solar", "oracle", {}),
         ("bound: solar only, no selling", "everything; stores only solar, covers only own load", "pf",
          {"grid_charge": False, "sell": False}),
@@ -1591,7 +1615,8 @@ class Analysis:
               f"`payback {row.payback_years:.1f} years · saves €{row.saving_eur_year_2027:,.0f}/year from 2027 · "
               f"price €{row.price_eur:,.0f} (€{row.eur_per_kwh_usable:,.0f} per usable kWh) · net present value "
               f"€{row.npv_eur:,.0f}`"]
-        if row.strategy in ("dynamic", "dynamic_sell", "forecast", "timed"):
+        if self.base_strategy(row.strategy) in ("dynamic", "dynamic_sell", "forecast", "timed") \
+                or row.strategy.endswith("_curtail"):
             simple = rec[(rec.battery_id == b.id) & (rec.contract_id == row._cid) & (rec.scenario == "nosal_min50")
                          & ~rec.partial & rec.price_year.isin(["profile"] + list(self.head_years))
                          & rec.strategy.isin(["self_consumption", "hbc_pv_first"])]
@@ -1600,7 +1625,9 @@ class Analysis:
                 ss = simple.groupby("strategy").saving.mean().sort_values(ascending=False)
                 alt = (f" Without it, plain `{ss.index[0]}` (battery app or Home Battery Control as-is) saves "
                        f"€{ss.iloc[0]:,.0f} a year.")
-            md.append(f"- **Control:** strategy `{row.strategy}` needs custom control (section 7).{alt}")
+            extra = (" Curtailing also needs a solar inverter Home Assistant can scale back."
+                     if row.strategy.endswith("_curtail") else "")
+            md.append(f"- **Control:** strategy `{row.strategy}` needs custom control (section 7).{extra}{alt}")
         md.append(f"- **Fit:** full on {row.days_full} days a year, stores {row.share_of_surplus_stored:.0%} of your "
                   f"solar surplus; below half full on {row.days_below_half} (winter) days.")
         combo = self.combination_table(b)

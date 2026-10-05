@@ -240,6 +240,20 @@ def test_perfect_foresight_bounds_heuristics():
     assert np.all(solar_only.batt_ac <= np.maximum(-net, 0) + 1e-7)   # charges only from surplus
 
 
+def test_curtail_only_cuts_negative_value_export():
+    from battery_calc.battery import curtail
+    b = make_battery()
+    net = random_net()
+    s = np.where(np.arange(len(net)) % 7 == 0, -0.05, 0.08)
+    r = simulate(net, SELF, b, 4600, degrade=False)
+    c = curtail(r, s)
+    assert np.all(c.exp[s < 0] == 0) and np.allclose(c.exp[s >= 0], r.exp[s >= 0])
+    assert np.allclose(c.curtailed + c.exp, r.exp)
+    value = lambda x: float((s * x.exp).sum())  # noqa: E731
+    assert value(c) >= value(r)                 # never earns less on export
+    assert np.allclose(c.imp, r.imp)            # curtailing never adds import
+
+
 def test_forecast_optimiser_uses_known_prices_and_beats_self_consumption():
     """A repeating day with a cheap night and an expensive evening: the
     optimiser charges at night and sells/covers the evening, and with a

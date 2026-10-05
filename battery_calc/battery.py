@@ -205,6 +205,17 @@ class SimResult:
     end_capacity: float
     soc: np.ndarray | None = None
     batt_ac: np.ndarray | None = None   # + charge, - discharge (AC side)
+    curtailed: np.ndarray | None = None  # solar export switched off (kWh per interval)
+
+
+def curtail(res: SimResult, s: np.ndarray, below: float = 0.0) -> SimResult:
+    """Zero export: whatever the house still exports after the battery has taken what
+    it can (battery full or at its power limit) is curtailed – the solar inverter scales
+    back – in every interval where exporting is worth less than `below` €/kWh
+    (default: negative-value export). The curtailed energy is simply not produced."""
+    from dataclasses import replace
+    cut = np.where(np.asarray(s, dtype=float) < below, res.exp, 0.0)
+    return replace(res, exp=res.exp - cut, curtailed=cut)
 
 
 def simulate(net: np.ndarray, modes, b: Battery, power_cap_w: float, soc0: float = 0.0,
