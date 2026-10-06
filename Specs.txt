@@ -582,3 +582,15 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - `perfect_foresight` uses its slower discretised approximation;
   - the payback section says so and suggests another browser or the command line.
 - The same site build works in Chromium, both on a page and in the Web Worker the site uses.
+
+### 11.17 Solar panels with and without the battery (2026-10-06)
+
+- **Section 11 now compares two options:**
+  - the panels alone, on the measured import and export;
+  - the panels plus the recommended battery, bought on `analysis.purchase_date` for its reference price.
+- The battery's yearly money path (best achievable strategy on the advice contract, capacity fading, up to its end of life) comes from the payback calculation (section 7). It is added on top of the panels' savings.
+- **Table** `solar_saving_per_year`: adds `battery_saving_eur`, `total_saving_eur` and `cumulative_with_battery_eur`.
+- **Charts:**
+  - the yearly bars stack the battery's extra saving;
+  - the cumulative chart shows "Panels only" and "Panels + battery". The second line drops by the battery price on the purchase date, and each line marks its own payback point.
+- **Text:** the section text and key finding give both payback years.

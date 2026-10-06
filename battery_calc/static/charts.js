@@ -289,10 +289,12 @@
         txt(svg, xScale(x) + 6, yScale(v) + 4, s.short || s.label, { fill: INK });
       }
     }
-    for (const mk of spec.points || []) {
+    (spec.points || []).forEach((mk, i) => {
       el("circle", { cx: xScale(mk.x), cy: yScale(mk.y), r: 5, fill: mk.color || INK, stroke: "#fff", "stroke-width": 2 }, svg);
-      if (mk.label) txt(svg, xScale(mk.x), yScale(mk.y) - 9, mk.label, { fill: INK, "text-anchor": "middle", "font-weight": 600 });
-    }
+      // alternate labels above / below so nearby points stay readable
+      if (mk.label) txt(svg, xScale(mk.x), yScale(mk.y) + (i % 2 ? 20 : -9), mk.label,
+                        { fill: INK, "text-anchor": "middle", "font-weight": 600 });
+    });
     const cross = el("line", { y1: m.t, y2: H - m.b, stroke: MUTED, "stroke-width": 1, visibility: "hidden" }, svg);
     const tip = tooltip(div);
     const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
