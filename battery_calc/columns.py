@@ -7,7 +7,7 @@ import re
 
 GLOSSARY = {
     # ------------------------------------------------------------ general
-    "size_class": "Capacity class: nominal capacity within ± the half-width of the class centre.",
+    "size_class": "Capacity class by nominal capacity: 5 kWh (2.5–6.25), 7.5 kWh (6.25–8.75), 10 kWh (8.75–12.5), 15 kWh (12.5–17.5).",
     "nominal_kwh": "Nominal (advertised) capacity in kWh.",
     "avoided_negative_export": "Money saved by curtailing solar export in negative-price quarter-hours (€/yr).",
     "free_days": "Days a year the kiln can fire on surplus solar alone (at most the tolerance from the grid).",
@@ -18,6 +18,7 @@ GLOSSARY = {
     "self_used_kwh": "Solar used directly in the house (production − export, kWh).",
     "exported_kwh": "Solar sent to the grid (kWh).",
     "cumulative_eur": "Running total of the savings minus the price paid (€); crosses 0 in the payback year.",
+    "bought_in": "Where the price comes from: NL = Dutch shop incl. VAT, DE = German manufacturer shop at 0% VAT plus travel/shipping.",
     "full_year": "True for a complete ownership year; the partial purchase year and partial last year are False.",
     "charged_kwh": "Energy put into the battery in the profile year (kWh, AC side).",
     "delivered_kwh": "Energy delivered by the battery in the profile year (kWh, AC side).",
@@ -31,11 +32,11 @@ GLOSSARY = {
                                "class (€).",
     "extra_price_vs_smaller": "Extra purchase price compared with the best battery of the next smaller class (€).",
     "payback_of_extra_years": "Years for the extra saving to earn back the extra price of stepping up a class "
-                              "('never' if it saves nothing extra).",
+                              "(0 if the bigger battery is cheaper; 'never' if it saves nothing extra).",
     "battery": "Brand and model of the battery configuration (capacity in the name).",
     "battery_id": "Short code of the battery in data/online/batteries.csv.",
     "id": "Short code of the battery in data/online/batteries.csv.",
-    "contract": "Electricity contract: supplier – product. 'Current contract – vast.txt' is your own fixed contract.",
+    "contract": "Electricity contract: supplier – product. 'Current contract – fixed' is your own fixed contract.",
     "strategy": "How the battery is controlled: self_consumption = store solar surplus, use it when the house "
                 "imports; timed = fixed daily charge/discharge windows; dynamic = day-ahead prices with peak "
                 "reservation (needs custom control); dynamic_sell = same, may also sell to the grid; forecast = daily "
@@ -48,7 +49,8 @@ GLOSSARY = {
                 "compensation) or 2030+ (no legal minimum).",
     "rules": "Rules that apply in that calendar year (2026 saldering, 2027–2029, 2030+).",
     "analysis": "headline = average of the last 3 full price years (2023–2025); full = all price years 2013–2025.",
-    "price_variant": "Which purchase price is used: NL current (today's lowest Dutch price incl. VAT), NL lowest-ever "
+    "price_variant": "Which purchase price is used: Cheapest NL/DE (with German prices on: the lower of today's NL "
+                     "and DE price; used for all decisions), NL current (today's lowest Dutch price incl. VAT), NL lowest-ever "
                      "(lowest price the scraper has seen), DE 0% VAT (German shop price without VAT + travel), "
                      "NL/DE Black Friday (real deal found in the Black Friday window) and (est.) = estimated "
                      "Black Friday discount on today's price.",
@@ -244,7 +246,7 @@ PATTERNS = [
     (r"at_charge_(\d+\.\d+)", "Minimum price difference worth charging when charging at €{0}/kWh: the discharge "
                               "price must be at least this much higher (all-in, €/kWh)."),
     (r"saving_(.+)", "Average yearly saving with the battery under the {0} (€)."),
-    (r"(\d+) kWh", "Saving per year of the best {0} kWh battery (€, 2027–2029 rules, latest full price year)."),
+    (r"([\d.]+) kWh", "Saving per year of the best {0} kWh battery (€, 2027–2029 rules, latest full price year)."),
     (r"free_days_(\d+)_kwh", "Free firing days per year with the best {0} kWh battery."),
     (r"avg_cost_per_firing_(\d+)_kwh", "Average grid cost per firing with the best {0} kWh battery (€)."),
     (r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", "Free firing days in {0}."),

@@ -8,6 +8,11 @@ import numpy as np
 import pandas as pd
 
 
+def _ref(df) -> str:
+    """The reference price variant: the cheaper of NL/DE when German prices are on."""
+    return "Cheapest NL/DE" if (df.price_variant == "Cheapest NL/DE").any() else "NL current"
+
+
 def _e(v) -> str:
     return f"€{v:,.0f}"
 
@@ -93,7 +98,7 @@ def _specs(df):
 
 
 def _breakeven(df):
-    d = df[df.price_variant == "NL current"] if "price_variant" in df else df
+    d = df[df.price_variant == _ref(df)] if "price_variant" in df else df
     r = _best(d, "wear_eur_kwh")
     return (f"Lowest wear cost: {r.battery} at {r.wear_eur_kwh * 100:.1f} ct per kWh delivered; discharging only pays "
             "when the price is at least charge price ÷ RTE + wear.")
@@ -116,9 +121,10 @@ def _savings(df):
 
 
 def _ranked(df):
-    d = df[(df.analysis == "headline") & (df.price_variant == "NL current") & (df.strategy != "perfect_foresight")]
+    d = df[(df.analysis == "headline") & (df.price_variant == _ref(df)) & (df.strategy != "perfect_foresight")]
     r = _best(d if len(d) else df, "payback_years")
-    return (f"Fastest payback at today's NL price: {r.battery} with {r.strategy} on {r.contract}, "
+    where = " (bought in Germany)" if r.get("bought_in") == "DE" else ""
+    return (f"Fastest payback at today's price{where}: {r.battery} with {r.strategy} on {r.contract}, "
             f"{r.payback_years:.1f} years (net present value {_e(r.npv_eur)}).")
 
 

@@ -560,3 +560,15 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - **Partial years and ageing:** the first and last year count only the months covered, weighted by monthly production. Output degrades 0.5% a year over a 25-year life.
   - **Cumulative chart:** starts at −`solar.price_eur` on the install date and crosses zero in the payback year. Without a price it starts at €0 and the section asks for the price. A yearly bar chart shows fixed (saldering) and dynamic years in separate colours.
   - **Settings:** price, kWp and install date are fields on the website and in config.yaml (`solar`).
+
+### 11.15 German prices, fixed-contract naming, 7.5 kWh class (2026-10-06)
+
+- **Include German prices** (website checkbox, `battery_defaults.use_german_prices`, CLI `--german-prices`):
+  - Every battery gets a "Cheapest NL/DE" price: the lower of today's NL price (incl. VAT) and the German manufacturer-shop price (0% VAT + `de_travel_cost_eur`).
+  - It replaces "NL current" as the reference in every decision: wear cost and break-even, payback ranking, size classes, advice, charts, Black Friday payback-now, sensitivity.
+  - The tables show `bought_in` (NL/DE). Off (default): Dutch prices only, as before.
+- **Contract name:** the current contract from vast.txt is shown as "Current contract – fixed".
+- **Size classes:** 5, 7.5, 10 and 15 kWh. The classes meet halfway between centres (2.5–6.25, 6.25–8.75, 8.75–12.5, 12.5–17.5 kWh nominal). Colours follow the class: blue, violet, orange, aqua; the four are validated all-pairs for the scatter chart.
+  - The shortlist adds the Marstek Venus A 6.36 kWh, so it holds 14 batteries with at least two per class.
+  - When a bigger class is cheaper than the next smaller one, its "payback of the extra" is 0.
+- **Settings text:** the battery choice explains that one battery per size class is followed, and that a picked battery replaces its class's winner and becomes the recommendation.

@@ -58,6 +58,8 @@ def run(settings_json: str, on_section=None, config_path: str = "config.yaml") -
             inputs.fixed_contract = contract_from_form(form)
         else:
             inputs.no_current_contract = True
+    if s.get("use_german_prices") is not None:
+        cfg.setdefault("battery_defaults", {})["use_german_prices"] = bool(s["use_german_prices"])
     bf = s.get("blackfriday") or {}
     for k in ("discount_nl", "discount_de"):
         if bf.get(k) is not None:

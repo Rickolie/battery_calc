@@ -124,6 +124,11 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
             German manufacturer shops without VAT (only delivered in Germany; check whether you can buy there).
             <b>Black Friday</b>: the real deal found during the Black Friday window, or <b>(est.)</b> an estimate
             with the discount set below. "All variants" shows them side by side.</p></div>
+        <div><label><input type="checkbox" id="usede"> Include German prices</label>
+          <p class="help">On: for every battery the cheaper of today's Dutch price (incl. VAT) and the German
+            manufacturer-shop price (0% VAT for home solar storage, plus €50 travel/shipping) is used in all
+            calculations, rankings and charts ("Cheapest NL/DE"; the tables show where it is bought). Off: Dutch
+            prices only. German shops usually deliver only to a German address.</p></div>
         <div><label for="fi2030">Feed-in minimum from 2030</label>
           <select id="fi2030"><option value="0">0% (default)</option><option value="0.3">30% (sensitivity)</option></select>
           <p class="help">From 2027 to 2029 suppliers must pay at least 50% of the energy price for power you
@@ -142,15 +147,16 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
       <legend>Batteries</legend>
       <div class="grid">
         <div><label for="bset">Batteries to compare</label>
-          <select id="bset"><option value="shortlist">Shortlist (13, faster)</option><option value="all">All batteries</option></select>
-          <p class="help">The <b>shortlist</b> holds 13 representative batteries, with at least two in each size class (5, 10 and 15 kWh); about 12 minutes.
+          <select id="bset"><option value="shortlist">Shortlist (14, faster)</option><option value="all">All batteries</option></select>
+          <p class="help">The <b>shortlist</b> holds 14 representative batteries, with at least two in each size class (5, 7.5, 10 and 15 kWh); about 13 minutes.
             <b>All batteries</b> compares every size and brand in the dataset (34 configurations) and can take
             30–45 minutes in the browser.</p></div>
-        <div><label for="chosen">Recommended battery</label>
-          <select id="chosen"><option value="">Fastest payback (automatic)</option></select>
-          <p class="help">One battery is worked out in more detail: the yearly earnings per strategy (where the
-            money comes from) and the daily charts; it also replaces the winner of its own size class. "Automatic"
-            picks the battery with the fastest payback.</p></div>
+        <div><label for="chosen">Battery to highlight</label>
+          <select id="chosen"><option value="">Best per size class (automatic)</option></select>
+          <p class="help">The report follows one battery per size class (5, 7.5, 10 and 15 kWh): the one with the
+            fastest payback in that class. Their earnings per strategy, daily charts and sanity check are shown
+            side by side, and the fastest of them is the recommendation. Pick a battery here to put it in place
+            of the automatic choice in its own size class and make it the recommendation.</p></div>
       </div>
     </fieldset>
 

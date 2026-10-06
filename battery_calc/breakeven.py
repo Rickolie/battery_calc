@@ -32,12 +32,13 @@ def breakeven(charge_price: float, rte: float, wear: float) -> float:
 
 
 def breakeven_rows(batteries, defaults: dict, avg_import: float, solar_2026: float, solar_2027: float,
-                   cycles: dict | None = None, de_travel: float = 0.0, bf: dict | None = None) -> list[dict]:
+                   cycles: dict | None = None, de_travel: float = 0.0, bf: dict | None = None,
+                   best: bool = False) -> list[dict]:
     rows = []
     cycles = cycles or {}
     for b in batteries:
         cpy = cycles.get(b.id, float(defaults.get("cycles_per_year", 250)))
-        variants = b.price_variants(de_travel, bf)
+        variants = b.price_variants(de_travel, bf, best)
         if not variants:
             variants = {"no price": None}
         for vname, price in variants.items():

@@ -240,6 +240,17 @@ def test_perfect_foresight_bounds_heuristics():
     assert np.all(solar_only.batt_ac <= np.maximum(-net, 0) + 1e-7)   # charges only from surplus
 
 
+def test_german_prices_pick_the_cheaper_country():
+    from battery_calc.battery import BEST_PRICE
+    b = make_battery(price_nl=1199.0)
+    b.price_de = 990.0
+    assert b.best_price(50.0) == (1040.0, "DE")
+    assert b.price_variants(50.0, best=True)[BEST_PRICE] == 1040.0
+    b.price_de = 1180.0
+    assert b.best_price(50.0) == (1199.0, "NL")          # DE + travel is dearer: stay in NL
+    assert BEST_PRICE not in b.price_variants(50.0)       # only with German prices on
+
+
 def test_curtail_only_cuts_negative_value_export():
     from battery_calc.battery import curtail
     b = make_battery()
