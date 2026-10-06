@@ -1671,6 +1671,32 @@ class Analysis:
             months = pd.date_range(start, today - pd.Timedelta(days=1), freq="D").month.unique()
             done = float(month_share.reindex(months).fillna(0).sum())
             so_far += float(cur.saving_eur.iloc[0]) * done / max(float(cur.share_of_year.iloc[0]), 1e-9)
+        # ---- the other option: panels plus the recommended battery (bought on the purchase date)
+        bat = self.solar_battery_path()
+        if bat is not None:
+            bname, bprice, bcum, bstart = bat
+            def bat_cum(x):                      # battery: cumulative saving − price at decimal year x
+                return float(bcum(x)) if x >= bstart else 0.0
+            starts = [max(install, pd.Timestamp(year=y, month=1, day=1)) for y in df.year]
+            ends = [min(end, pd.Timestamp(year=y + 1, month=1, day=1)) for y in df.year]
+            dec = lambda ts: ts.year + (ts.dayofyear - 1) / 365.0  # noqa: E731
+            bsave = []
+            for a, z in zip(starts, ends):
+                s_ = bat_cum(dec(z)) - bat_cum(dec(a))
+                if dec(a) <= bstart < dec(z):
+                    s_ += bprice                 # the purchase is not a saving
+                bsave.append(s_)
+            df["battery_saving_eur"] = bsave
+            df["total_saving_eur"] = df.saving_eur + df.battery_saving_eur
+            df["cumulative_with_battery_eur"] = df.cumulative_eur + [bat_cum(dec(z)) for z in ends]
+            sec.tables["solar_saving_per_year"] = df.round(2)
+            pb2 = None
+            prev, prev_x = -(price or 0.0), dec(install)
+            for z, v in zip(ends, df.cumulative_with_battery_eur):
+                if price and v >= 0 > prev:
+                    pb2 = prev_x + (dec(z) - prev_x) * (-prev) / (v - prev)
+                    break
+                prev, prev_x = v, dec(z)
         fixed_rows = df[df.contract == (fixed.label if fixed else "")]
         dyn_rows = df[(df.contract != (fixed.label if fixed else "")) & (df.share_of_year > 0.99)]
         f_full = fixed_rows[fixed_rows.share_of_year > 0.99].saving_eur.mean() if len(fixed_rows) else np.nan
@@ -1679,7 +1705,9 @@ class Analysis:
                        f"€{d_full:,.0f} a year from 2027 on the dynamic contract; "
                        + (f"paid back in {payback_year:.1f}." if payback_year else
                           "set the price paid to see the payback year." if not price else
-                          "not paid back within their lifetime."))
+                          "not paid back within their lifetime.")
+                       + (f" With the {bname} as well: paid back in {pb2:.1f}." if bat is not None and price and pb2
+                          else ""))
         md = ["`saving = yearly cost without panels − yearly cost with panels` (same contract and rules; without "
               "panels you would import everything the house used)",
               "`house use = import + solar used directly`, `solar used directly = production − export`",
@@ -1694,6 +1722,15 @@ class Analysis:
         else:
             md.append("- **No price set:** enter what the panels cost (settings, or `solar.price_eur` in "
                       "config.yaml) to see the payback year; the cumulative line now starts at €0.")
+        if bat is not None:
+            extra = df[df.year >= 2027].battery_saving_eur
+            md.append(f"- **With the {bname}** (bought {pd.Timestamp(self.cfg['analysis']['purchase_date']).date()} for "
+                      f"€{bprice:,.0f}): it adds about €{extra[extra > 0].iloc[:3].mean():,.0f} a year from 2027 on "
+                      "top of the panels" + (f"; panels and battery together are paid back in **{pb2:.1f}** "
+                                             f"(panels alone {payback_year:.1f})." if price and pb2 and payback_year
+                                             else "."))
+        else:
+            md.append("- Without a battery with a price there is no 'panels + battery' comparison.")
         if est and self.pv is None:
             md.append("- **kWp unknown:** set the real system size for a better production estimate.")
         elif self.pv is None and kwp and prod.sum() > float(kwp) * float(sc.get("yield_kwh_per_kwp", 900)) * 1.05:
@@ -1726,6 +1763,11 @@ class Analysis:
                         "color": "#2a78d6", "values": [round(v, 1) if f else 0 for v, f in zip(df.saving_eur, is_fixed)]},
                        {"label": f"Dynamic contract ({dyn.label if dyn else '–'})", "color": "#eb6834",
                         "values": [0 if f else round(v, 1) for v, f in zip(df.saving_eur, is_fixed)]}]}
+        if bat is not None:
+            sec.interactive["solar_yearly"]["series"].append(
+                {"label": f"Extra with the {bname}", "color": "#1baf7a",
+                 "values": [round(v, 1) for v in df.battery_saving_eur]})
+            sec.interactive["solar_yearly"]["title"] = "What the panels (and the battery on top) save each year"
         x = [install.year + (install.dayofyear - 1) / 365.0] + [
             float(max(install, pd.Timestamp(year=y + 1, month=1, day=1)).year) for y in df.year[:-1]] + [
             end.year + (end.dayofyear - 1) / 365.0]
@@ -1743,8 +1785,51 @@ class Analysis:
         if payback_year:
             spec["points"] = [{"x": round(payback_year, 3), "y": 0, "color": "#2a78d6",
                                "label": f"paid back {payback_year:.1f}"}]
+        if bat is not None:
+            # insert the battery purchase so the line drops there by the battery price
+            xs = list(x)
+            panels = list(vals)
+            if xs[0] < bstart < xs[-1] and bstart not in xs:
+                i = next(k for k, v in enumerate(xs) if v > bstart)
+                f = (bstart - xs[i - 1]) / (xs[i] - xs[i - 1])
+                xs.insert(i, bstart)
+                panels.insert(i, round(panels[i - 1] + f * (panels[i] - panels[i - 1]), 1))
+            names = [f"installed {install.date()}"] + [
+                f"battery bought {pd.Timestamp(self.cfg['analysis']['purchase_date']).date()}" if abs(v - bstart) < 1e-9
+                else f"1 Jan {round(v)}" for v in xs[1:-1]] + ["end of life"]
+            spec.update({"x": [round(v, 3) for v in xs], "xNames": names, "endLabels": True,
+                         "title": "Cumulative: panels alone vs panels + battery",
+                         "subtitle": spec["subtitle"] + f" The second line also buys the {bname} "
+                                     f"(€{bprice:,.0f}) on {pd.Timestamp(self.cfg['analysis']['purchase_date']).date()} "
+                                     "and adds its yearly saving (best strategy, capacity fading, until its end of life)."})
+            spec["series"] = [dict(spec["series"][0], label="Panels only", short="panels only", values=panels),
+                              {"label": f"Panels + {bname}", "short": "panels + battery", "color": "#1baf7a",
+                               "values": [round(p_ + bat_cum(v), 1) for p_, v in zip(panels, xs)]}]
+            if price and pb2:
+                spec.setdefault("points", []).append({"x": round(pb2, 3), "y": 0, "color": "#1baf7a",
+                                                      "label": f"with battery {pb2:.1f}"})
         sec.interactive["solar_cumulative"] = spec
         self.emit(sec)
+
+    def solar_battery_path(self):
+        """The recommended battery's money path for the solar section:
+        (name, price, cumulative(decimal year) -> € saved − price, purchase as decimal year),
+        or None without a priced battery."""
+        summary = getattr(self, "payback_summary", None)
+        rk = summary.get("ranked") if summary else None
+        b = getattr(self, "chosen", None)
+        if rk is None or rk.empty or b is None:
+            return None
+        r = self.achievable_ranked(rk)
+        r = r[r._bid == b.id]
+        if r.empty:
+            return None
+        r = r.iloc[0]
+        start = pd.Timestamp(self.cfg["analysis"]["purchase_date"])
+        s0 = start.year + (start.dayofyear - 1) / 365.0
+        ts = np.array([s0 + t for t, _ in r["_path"]])
+        vs = np.array([v for _, v in r["_path"]])
+        return b.name, float(r["price_eur"]), (lambda x: np.interp(x, ts, vs)), s0
 
     # ------------------------------------------------------------------ advice (shown first)
     def step_advice(self):

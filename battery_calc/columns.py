@@ -19,6 +19,8 @@ GLOSSARY = {
     "exported_kwh": "Solar sent to the grid (kWh).",
     "cumulative_eur": "Running total of the savings minus the price paid (€); crosses 0 in the payback year.",
     "bought_in": "Where the price comes from: NL = Dutch shop incl. VAT, DE = German manufacturer shop at 0% VAT plus travel/shipping.",
+    "total_saving_eur": "Panels plus battery saving that year (€).",
+    "cumulative_with_battery_eur": "Running total for panels + battery: savings minus both purchase prices (€).",
     "full_year": "True for a complete ownership year; the partial purchase year and partial last year are False.",
     "charged_kwh": "Energy put into the battery in the profile year (kWh, AC side).",
     "delivered_kwh": "Energy delivered by the battery in the profile year (kWh, AC side).",
