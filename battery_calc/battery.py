@@ -15,6 +15,7 @@ MODE_NAMES = {SELF: "self_consumption", GRID_CHARGE: "charge", FULL_DISCHARGE: "
 SUB_MODES = {"self_consumption": SELF, "charge_pv": CHARGE_PV, "zero_import": ZERO_IMPORT, "idle": IDLE}
 
 DT_H = 0.25
+BEST_PRICE = "Cheapest NL/DE"      # price variant: the lower of today's NL and DE price (German prices on)
 
 
 @dataclass
@@ -69,11 +70,25 @@ class Battery:
     def estimated(self) -> bool:
         return bool(self.estimated_fields)
 
-    def price_variants(self, de_travel: float = 0.0, bf: dict | None = None) -> dict:
+    def best_price(self, de_travel: float = 0.0) -> tuple[float | None, str]:
+        """Today's lower price of the Dutch shops (incl. VAT) and the German manufacturer
+        shop (0% VAT for home solar storage, plus travel/shipping): (price, "NL"/"DE")."""
+        nl = None if self.price_nl is None else self.price_nl + self.extra_hardware
+        de = None if self.price_de is None else self.price_de + self.extra_hardware + de_travel
+        if de is not None and (nl is None or de < nl):
+            return de, "DE"
+        return nl, "NL" if nl is not None else ""
+
+    def price_variants(self, de_travel: float = 0.0, bf: dict | None = None, best: bool = False) -> dict:
         """Purchase price per scenario. Black Friday prices use the real deal when
         known, plus a configured discount on the current price ("est.") unless
-        `bf["estimates"]` is false."""
+        `bf["estimates"]` is false. With `best`, the first variant is the cheaper of
+        today's NL and DE price (BEST_PRICE)."""
         out = {}
+        if best:
+            p, _ = self.best_price(de_travel)
+            if p is not None:
+                out[BEST_PRICE] = p
         if self.price_nl is not None:
             out["NL current"] = self.price_nl + self.extra_hardware
         if self.price_nl_lowest is not None:

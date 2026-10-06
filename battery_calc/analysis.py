@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from . import charts, extras
-from .battery import (GRID_CHARGE, SELF, ZERO_IMPORT, Battery, curtail, in_scope, load_batteries,
+from .battery import (BEST_PRICE, GRID_CHARGE, SELF, ZERO_IMPORT, Battery, curtail, in_scope, load_batteries,
                       perfect_foresight, plan_dynamic, plan_forecast, plan_hbc, plan_timed, simulate)
 from .breakeven import breakeven_rows, wear_cost
 from .report import slug
@@ -82,6 +82,9 @@ class Analysis:
             self.regimes["nosal_2030"] = {**self.regimes["nosal_2030"], "feed_in_min_frac": opts.feed_in_2030}
         self.scenarios = list(self.regimes)
         self.results: dict = {}
+        # German prices on: every calculation uses the cheaper of today's NL and DE price.
+        self.use_de = bool(cfg.get("battery_defaults", {}).get("use_german_prices", False))
+        self.ref_variant = BEST_PRICE if self.use_de else "NL current"
 
     # ------------------------------------------------------------------ utils
     def emit(self, sec: Section):
@@ -608,10 +611,10 @@ class Analysis:
 
     def wear_for(self, b: Battery, cycles: float | None = None) -> tuple[float, str]:
         d = self.cfg.get("battery_defaults", {})
-        variants = b.price_variants(d.get("de_travel_cost_eur", 0.0))
+        variants = b.price_variants(d.get("de_travel_cost_eur", 0.0), best=self.use_de)
         if not variants:
             return 0.0, "no price"
-        name = "NL current" if "NL current" in variants else next(iter(variants))
+        name = self.ref_variant if self.ref_variant in variants else next(iter(variants))
         w, _, _ = wear_cost(b, variants[name], cycles or d.get("cycles_per_year", 250), d.get("residual_value", 0.0))
         return w, name
 
@@ -620,7 +623,7 @@ class Analysis:
         d = self.cfg.get("battery_defaults", {})
         rows = breakeven_rows(self.batteries, d, avg["saldering"][0], avg["saldering"][1], avg["nosal_min50"][1],
                               cycles=cycles, de_travel=d.get("de_travel_cost_eur", 0.0),
-                              bf=self.cfg.get("blackfriday"))
+                              bf=self.cfg.get("blackfriday"), best=self.use_de)
         sid = "breakeven" if cycles is None else "breakeven_recomputed"
         sec = Section(sid, ("6. Break-even price per battery" if cycles is None
                             else "8. Break-even with simulated cycles") + title_suffix)
@@ -646,7 +649,7 @@ class Analysis:
             md.append(f"- Cycles per year: default {d.get('cycles_per_year', 250)} (simulated values in section 8).")
         sec.md = "\n".join(md)
         priced = [r for r in rows if r["purchase_eur"] is not None and not math.isnan(r["wear_eur_kwh"])
-                  and r["price_variant"] == "NL current"]
+                  and r["price_variant"] == self.ref_variant]
         picks = []
         if cycles is not None and getattr(self, "focus", None):
             ids = {f["b"].id: f for f in self.focus}
@@ -679,7 +682,7 @@ class Analysis:
                       index=False)
         self.breakeven_df = df
         if len(df):
-            nl = df[df.price_variant == "NL current"]
+            nl = df[df.price_variant == self.ref_variant]
             wear = dict(zip(nl.battery_id, nl.wear_eur_kwh))
             cheap = self.typical_cheap_price()
             md_rows = extras.min_difference_rows(self.batteries, wear, cheap, self.taxes.vat)
@@ -695,7 +698,7 @@ class Analysis:
 
     def breakeven_explainer(self, rows) -> list[str]:
         """Plain-language formula with a worked example (first priced battery)."""
-        ex = next((r for r in rows if r["price_variant"] == "NL current" and r["purchase_eur"]
+        ex = next((r for r in rows if r["price_variant"] == self.ref_variant and r["purchase_eur"]
                    and not math.isnan(r["wear_eur_kwh"])), None)
         out = ["#### How the break-even price is calculated",
                "`break-even price = charge price / RTE + wear cost` (€ per kWh delivered, all-in).",
@@ -1099,7 +1102,7 @@ class Analysis:
         if rk is None or rk.empty:
             return None
         h = rk[(rk.analysis == "headline") & (rk.strategy != "perfect_foresight")]   # only achievable strategies
-        now = h[h.price_variant == "NL current"]
+        now = h[h.price_variant == self.ref_variant]
         if now.empty:
             return None
         best = now.sort_values("payback_years").drop_duplicates("_bid")
@@ -1113,7 +1116,7 @@ class Analysis:
             row = {"size_class": self.class_of(b)[0] or "other",
                    "battery": r["battery"], "usable_kwh": r["usable_kwh"], "contract": r["contract"],
                    "strategy": r["strategy"],
-                   "nl_now_eur": pr.get("NL current"), "payback_now": pb.get("NL current"),
+                   "nl_now_eur": pr.get("NL current"), "payback_now": pb.get(self.ref_variant),
                    "nl_deal_eur": b.price_bf_nl, "nl_deal_discount": disc(b.price_bf_nl, b.price_nl_ref),
                    "payback_nl_deal": pb.get("NL Black Friday"),
                    "nl_est_eur": pr.get("NL Black Friday (est.)"), "payback_nl_est": pb.get("NL Black Friday (est.)"),
@@ -1145,7 +1148,7 @@ class Analysis:
             self.log(f"  chosen battery {want!r} not found; using the fastest payback")
         rk = summary.get("ranked") if summary else None
         if rk is not None and len(rk):
-            r = rk[(rk.analysis == "headline") & (rk.price_variant == "NL current")
+            r = rk[(rk.analysis == "headline") & (rk.price_variant == self.ref_variant)
                    & (rk.strategy != "perfect_foresight")]
             adv = self.advice_contract()
             if adv is not None and (r._cid == adv.id).any():
@@ -1162,7 +1165,8 @@ class Analysis:
         return min(min(lim), float(self.cfg["analysis"].get("horizon_years", 20)))
 
     # ------------------------------------------------------------------ size classes
-    CLASS_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]          # validated categorical slots 1-3
+    CLASS_COLORS = ["#2a78d6", "#4a3aa7", "#eb6834", "#1baf7a"]   # validated all-pairs (scatter) as a set
+    CLASS_COLOR_BY_KWH = {5.0: "#2a78d6", 7.5: "#4a3aa7", 10.0: "#eb6834", 15.0: "#1baf7a"}
     EARN_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
     EARN_KEYS = [("avoided_import", "Avoided import"), ("sold_to_grid", "Sold to grid"),
                  ("solar_feed_in_given_up", "Feed-in given up (stored solar)"),
@@ -1170,10 +1174,19 @@ class Analysis:
                  ("avoided_negative_export", "Curtailed export (negative prices avoided)")]
 
     def size_classes(self):
+        """[(label, lower kWh, upper kWh, colour)]: each class runs to the midpoint between
+        its neighbours' centres; the outer edges are centre ± size_class_halfwidth_kwh.
+        Colours follow the class (5 blue, 7.5 violet, 10 orange, 15 aqua)."""
         a = self.cfg.get("analysis", {})
         half = float(a.get("size_class_halfwidth_kwh", 2.5))
-        return [(f"{c:g} kWh", float(c) - half, float(c) + half, self.CLASS_COLORS[i % 3])
-                for i, c in enumerate(a.get("size_classes_kwh", [5, 10, 15]))]
+        cs = sorted(float(c) for c in a.get("size_classes_kwh", [5, 7.5, 10, 15]))
+        out = []
+        for i, c in enumerate(cs):
+            lo = (cs[i - 1] + c) / 2 if i else c - half
+            hi = (c + cs[i + 1]) / 2 if i + 1 < len(cs) else c + half
+            color = self.CLASS_COLOR_BY_KWH.get(c, self.CLASS_COLORS[i % len(self.CLASS_COLORS)])
+            out.append((f"{c:g} kWh", lo, hi, color))
+        return out
 
     def size_of(self, b: Battery) -> float:
         return b.nominal_kwh or b.usable_kwh
@@ -1188,16 +1201,18 @@ class Analysis:
         return next(x for x in self.batteries if x.id == bid)
 
     def achievable_ranked(self, rk: pd.DataFrame) -> pd.DataFrame:
-        """Fastest-payback row per battery: headline years, today's NL price, achievable
+        """Fastest-payback row per battery: headline years, today's reference price (NL, or the
+        cheaper of NL/DE with German prices on), achievable
         strategies, on the advice contract."""
-        h = rk[(rk.analysis == "headline") & (rk.price_variant == "NL current") & (rk.strategy != "perfect_foresight")]
+        h = rk[(rk.analysis == "headline") & (rk.price_variant == self.ref_variant)
+               & (rk.strategy != "perfect_foresight")]
         adv = self.advice_contract()
         if adv is not None and (h._cid == adv.id).any():
             h = h[h._cid == adv.id]
         return h.sort_values("payback_years").drop_duplicates("_bid")
 
     def pick_focus(self, summary) -> list[dict]:
-        """The best-value battery of each size class (5/10/15 kWh ± 2.5): these three
+        """The best-value battery of each size class (5 / 7.5 / 10 / 15 kWh): these
         are followed through every later section. A fixed chosen battery replaces
         the winner of its own class."""
         rk = summary.get("ranked") if summary else None
@@ -1215,6 +1230,12 @@ class Analysis:
                         "c": next(x for x in self.contracts if x.id == r["_cid"]), "strategy": r["strategy"],
                         "row": r})
         return out
+
+    def price_basis(self) -> str:
+        if self.use_de:
+            t = float(self.cfg.get("battery_defaults", {}).get("de_travel_cost_eur", 0.0))
+            return f"today's cheaper price of NL (incl. VAT) and DE (0% VAT + €{t:,.0f} travel)"
+        return "today's NL price (incl. VAT)"
 
     def short_name(self, b: Battery) -> str:
         return re.sub(r"\s*\(.*\)$", "", b.name)
@@ -1236,7 +1257,7 @@ class Analysis:
                         "color": col, "strong": b.id in focus,
                         "short": f"{cls}: {self.short_name(b)}" if b.id in focus else "",
                         "rows": [[col, f"{r['payback_years']:.1f} years", "payback"],
-                                 [col, f"€{r['price_eur']:,.0f}", "price"],
+                                 [col, f"€{r['price_eur']:,.0f}", f"price ({r.get('bought_in') or 'NL'})"],
                                  [col, f"€{r['_saving27']:,.0f} a year", f"saving from 2027 ({r['strategy']})"],
                                  [col, f"€{r['npv_eur']:,.0f}", "net present value"]]})
         legend = [{"label": lab, "color": col} for lab, _, _, col in self.size_classes()]
@@ -1245,7 +1266,7 @@ class Analysis:
         c = self.advice_contract()
         return {"kind": "scatter", "title": "Payback time per battery",
                 "subtitle": f"One dot per battery: its best strategy on {c.label if c else 'the best contract'}, at "
-                            "today's NL price. Lower is better; the best of each size class is labelled.",
+                            f"{self.price_basis()}. Lower is better; the best of each size class is labelled.",
                 "xLabel": "usable capacity (kWh)", "yLabel": "payback (years)", "yUnit": "yr",
                 "points": pts, "legend": legend, "height": 340}
 
@@ -1275,7 +1296,8 @@ class Analysis:
                                                  else f"end of life ({x:.1f})" for x in grid[1:]]
         c = self.advice_contract()
         return {"kind": "lines", "title": "Cumulative return: when the savings have paid for the battery",
-                "subtitle": f"Starts at minus the price on {start.date()}, then adds each year's saving (best strategy on "
+                "subtitle": f"Starts at minus {self.price_basis()} on {start.date()}, then adds each year's saving "
+                            f"(best strategy on "
                             f"{c.label if c else 'the best contract'}, capacity fading). The line crosses zero in the "
                             "payback year and ends at the battery's end of life. Grey: the other batteries.",
                 "x": grid, "xNames": names, "xTicks": list(range(math.ceil(s0), math.floor(grid[-1]) + 1)),
@@ -1739,6 +1761,7 @@ class Analysis:
             surplus = daily.solar_surplus_kwh.sum()
             return {"size_class": self.class_of(b)[0] or "other", "battery": b.name, "price_eur": r["price_eur"],
                     "eur_per_kwh_usable": r["eur_per_kwh_usable"], "usable_kwh": b.usable_kwh,
+                    "bought_in": r.get("bought_in", "NL"),
                     "contract": r["contract"], "strategy": r["strategy"], "saving_eur_year_2027": r["_saving27"],
                     "payback_years": r["payback_years"], "npv_eur": r["npv_eur"],
                     "days_full": int(daily.full.sum()),
@@ -1759,7 +1782,8 @@ class Analysis:
                        f"€{row.saving_eur_year_2027:,.0f} a year from 2027.")
         md = [f"### Recommendation: **{b.name}**" + (f" on **{adv.label}**" if adv is not None else ""),
               f"`payback {row.payback_years:.1f} years · saves €{row.saving_eur_year_2027:,.0f}/year from 2027 · "
-              f"price €{row.price_eur:,.0f} (€{row.eur_per_kwh_usable:,.0f} per usable kWh) · net present value "
+              f"price €{row.price_eur:,.0f}{' in Germany' if row.bought_in == 'DE' else ''} "
+              f"(€{row.eur_per_kwh_usable:,.0f} per usable kWh) · net present value "
               f"€{row.npv_eur:,.0f}`"]
         if self.base_strategy(row.strategy) in ("dynamic", "dynamic_sell", "forecast", "timed") \
                 or row.strategy.endswith("_curtail"):
@@ -1800,7 +1824,7 @@ class Analysis:
         for f in getattr(self, "focus", []) or []:
             d = describe(f["row"].to_dict())
             row = {"size_class": f["cls"], "battery": d["battery"], "nominal_kwh": self.size_of(f["b"]),
-                   "usable_kwh": d["usable_kwh"], "price_eur": d["price_eur"],
+                   "usable_kwh": d["usable_kwh"], "price_eur": d["price_eur"], "bought_in": d.get("bought_in", "NL"),
                    "eur_per_kwh_usable": d["eur_per_kwh_usable"], "strategy": d["strategy"],
                    "saving_eur_year_2027": d["saving_eur_year_2027"], "payback_years": d["payback_years"],
                    "npv_eur": d["npv_eur"], "lifetime_net_saving_eur": f["row"].get("lifetime_net_saving_eur", np.nan),
@@ -1810,7 +1834,7 @@ class Analysis:
                 dp = row["price_eur"] - prev["price_eur"]
                 row["extra_saving_vs_smaller"] = ds
                 row["extra_price_vs_smaller"] = dp
-                row["payback_of_extra_years"] = dp / ds if ds > 0 else np.inf
+                row["payback_of_extra_years"] = (0.0 if dp <= 0 else dp / ds) if ds > 0 else np.inf
             rows.append(row)
             prev = row
         return pd.DataFrame(rows) if rows else None
@@ -1822,13 +1846,17 @@ class Analysis:
         lines = ["", "### Which size?",
                  "`payback of the extra = extra price ÷ extra saving per year` (stepping up one size class)"]
         for r in classes.itertuples():
-            s = (f"- **{r.size_class}:** {r.battery} – €{r.price_eur:,.0f}, €{r.saving_eur_year_2027:,.0f}/yr "
+            de = " in Germany" if getattr(r, "bought_in", "NL") == "DE" else ""
+            s = (f"- **{r.size_class}:** {r.battery} – €{r.price_eur:,.0f}{de}, €{r.saving_eur_year_2027:,.0f}/yr "
                  f"(`{r.strategy}`), payback {r.payback_years:.1f} yr, NPV €{r.npv_eur:,.0f}")
             extra = getattr(r, "extra_saving_vs_smaller", np.nan)
             if isinstance(extra, float) and not np.isnan(extra):
                 pe = r.payback_of_extra_years
-                s += (f"; the extra €{r.extra_price_vs_smaller:,.0f} earns €{extra:,.0f}/yr"
-                      + (f" → {pe:.1f} yr" if np.isfinite(pe) else " → never"))
+                if r.extra_price_vs_smaller <= 0:
+                    s += f"; costs €{-r.extra_price_vs_smaller:,.0f} less than the smaller class and saves €{extra:,.0f}/yr more"
+                else:
+                    s += (f"; the extra €{r.extra_price_vs_smaller:,.0f} earns €{extra:,.0f}/yr"
+                          + (f" → {pe:.1f} yr" if np.isfinite(pe) else " → never"))
             lines.append(s)
         if best_npv.size_class == fastest.size_class:
             lines.append(f"- **{fastest.size_class}** wins on both payback and lifetime value.")
@@ -1948,9 +1976,10 @@ class Analysis:
                                  **{f"saving_{self.regimes[s]['label']}": v for s, v in by_scn.items()},
                                  "efc_per_year": efc, "standby_eur_year_approx": (b.standby_w or 0) * 8.76 *
                                  self.avg_u_cache(), "estimated": "yes" if b.estimated else ""})
-                variants = b.price_variants(d.get("de_travel_cost_eur", 0.0), self.cfg.get("blackfriday"))
+                variants = b.price_variants(d.get("de_travel_cost_eur", 0.0), self.cfg.get("blackfriday"), self.use_de)
                 if self.opts.price_variant != "all":
-                    variants = {k: v for k, v in variants.items() if k == self.opts.price_variant}
+                    variants = {k: v for k, v in variants.items() if k in (self.opts.price_variant, self.ref_variant)}
+                src = b.best_price(d.get("de_travel_cost_eur", 0.0))[1]
                 for vname, price in variants.items():
                     pb = payback(price, by_scn, efc, delivered, b, self.cfg)
                     per_year = []
@@ -1961,7 +1990,9 @@ class Analysis:
                                                     gy[gy.scenario == "nosal_min50"]["delivered_kwh"].mean(), b,
                                                     self.cfg)["payback_years"])
                     ranked.append({"battery": b.name, "usable_kwh": round(b.usable_kwh, 2), "contract": c.label,
-                                   "strategy": strat, "analysis": aname, "price_variant": vname, "price_eur": price,
+                                   "strategy": strat, "analysis": aname, "price_variant": vname,
+                                   "bought_in": src if vname == BEST_PRICE else ("DE" if vname.startswith("DE") else "NL"),
+                                   "price_eur": price,
                                    "eur_per_kwh_usable": round(price / b.usable_kwh) if b.usable_kwh else None,
                                    "payback_years": pb["payback_years"],
                                    "payback_min": min(per_year) if per_year else pb["payback_years"],

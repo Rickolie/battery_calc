@@ -136,7 +136,7 @@ $("run").onclick = () => {
     contract: state.useRicks ? null : contractForm(),
     connection: $("connection").value, margin: parseFloat($("margin").value), price_variant: $("variant").value,
     feed_in_2030: parseFloat($("fi2030").value), quick: $("quick").value === "1",
-    battery_set: $("bset").value, chosen_battery: $("chosen").value,
+    battery_set: $("bset").value, chosen_battery: $("chosen").value, use_german_prices: $("usede").checked,
     blackfriday: { discount_nl: pct("bfnl"), discount_de: pct("bfde"), estimates: $("bfest").checked },
     kiln: { firing_hours: num("kh"), avg_duty: pct("kd") },
     solar: { price_eur: num("pvprice"), kwp: num("pvkwp"), install_date: $("pvdate").value || null },
