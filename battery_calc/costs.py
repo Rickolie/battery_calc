@@ -103,7 +103,7 @@ def compute_cost(period: Period, contract: Contract, regime: dict, taxes: Taxes,
     energy_tax = eb_kwh * eb * (1 + vat)
     income *= fi_vat
     annual_export = X / frac if frac > 0 else X
-    fic = (contract.feed_in_cost_kwh * X
+    fic = (contract.feed_in_cost_per_kwh(post2027=not sal) * X
            + contract.feed_in_cost_year(annual_export, post2027=not sal) * frac) * (1 + vat)
     if not sal:
         fic = min(fic, max(income, 0.0))  # net payment for export may not go below zero
@@ -128,7 +128,7 @@ def marginal_values(period: Period, contract: Contract, regime: dict, taxes: Tax
     sal = bool(regime.get("saldering"))
     mf = float(regime.get("feed_in_min_frac", 0.0))
     fi_vat = (1 + vat) if regime.get("feed_in_incl_vat") else 1.0
-    fic = contract.feed_in_cost_kwh * (1 + vat)
+    fic = contract.feed_in_cost_per_kwh(post2027=not sal) * (1 + vat)
     n = len(period.imp)
     if contract.is_dynamic:
         p = period.spot
