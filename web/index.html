@@ -146,10 +146,11 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
           <p class="help">The <b>shortlist</b> holds 13 representative batteries, with at least two in each size class (5, 10 and 15 kWh); about 12 minutes.
             <b>All batteries</b> compares every size and brand in the dataset (34 configurations) and can take
             30–45 minutes in the browser.</p></div>
-        <div><label for="chosen">Battery for the earnings chart and the kiln</label>
+        <div><label for="chosen">Recommended battery</label>
           <select id="chosen"><option value="">Fastest payback (automatic)</option></select>
           <p class="help">One battery is worked out in more detail: the yearly earnings per strategy (where the
-            money comes from) and the pottery kiln objective. "Automatic" picks the battery with the fastest payback.</p></div>
+            money comes from) and the daily charts; it also replaces the winner of its own size class. "Automatic"
+            picks the battery with the fastest payback.</p></div>
       </div>
     </fieldset>
 
@@ -176,8 +177,9 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
 
     <fieldset>
       <legend>Pottery kiln on free power</legend>
-      <p class="help">How many days per year a kiln can do a full firing on solar surplus (plus the chosen
-        battery), with at most 5% of its energy from the grid. Take the values from your kiln's data sheet.</p>
+      <p class="help">How many days per year a kiln can do a full firing on surplus solar alone (the energy you
+        would otherwise export, no battery), with at most 5% of its energy from the grid. Take the values from
+        your kiln's data sheet.</p>
       <div class="grid">
         <div><label for="kh">Hours to maximum temperature</label>
           <input id="kh" inputmode="decimal" value="8">
@@ -188,6 +190,27 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
           <p class="help">A kiln switches its elements on and off; on average it draws only part of its rated
             power. Energy per firing = rated kW × hours × this share (8 h × 70% = 5.6 kWh per rated kW).
             Use 100% to be on the safe side.</p></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Solar panels: what they earn</legend>
+      <p class="help">Section 11 works out what the panels saved you each year since installation, with your
+        actual contracts: the fixed contract until 1 January 2027, then the cheapest dynamic contract. Leave a
+        field empty to use the value from config.yaml.</p>
+      <div class="grid">
+        <div><label for="pvprice">Price paid for the panels</label>
+          € <input id="pvprice" inputmode="decimal" placeholder="e.g. 5400">
+          <p class="help">Panels, inverter and installation, after any VAT refund. Without a price the section
+            shows the savings but no payback year.</p></div>
+        <div><label for="pvkwp">System size (kWp)</label>
+          <input id="pvkwp" inputmode="decimal" placeholder="e.g. 4.8">
+          <p class="help">Total peak power of the panels (number of panels × Wp ÷ 1000). Production is modelled
+            from it (about 900 kWh per kWp a year in the Netherlands). Empty: estimated from your export,
+            assuming you use 30% of the production yourself.</p></div>
+        <div><label for="pvdate">Installed on</label>
+          <input id="pvdate" type="date" value="2024-07-01">
+          <p class="help">First day the panels produced.</p></div>
       </div>
     </fieldset>
 

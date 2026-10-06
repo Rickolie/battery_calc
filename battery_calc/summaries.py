@@ -196,17 +196,25 @@ def _combos(df):
 
 
 def _kiln(df):
-    cols = [c for c in df.columns if c.startswith("free_days_")]
-    d = df[df[cols].max(axis=1) > 0]
+    d = df[df.free_days > 0]
     if d.empty:
-        return "No kiln size fires on free power alone."
-    r = d.iloc[-1]
-    parts = [f"{c.replace('free_days_', '').replace('_kwh', ' kWh').replace('_', ' ')} {int(r[c])}" for c in cols]
-    return f"Largest kiln with free days: {r.kiln_kw:g} kW (" + ", ".join(parts) + " days)."
+        return "No kiln size fires on surplus solar alone."
+    big = d[d.free_days >= 20]
+    r = (big if len(big) else d).iloc[-1]
+    return f"{r.kiln_kw:g} kW fires on surplus solar on {int(r.free_days)} days a year ({r.months_with_free_days})."
+
+
+def _solar(df):
+    neg = df[df.cumulative_eur < 0]
+    paid = df[df.cumulative_eur >= 0]
+    s = f"Saved {_e(df.saving_eur.iloc[:3].sum())} in {df.year.iloc[0]}–{df.year.iloc[min(2, len(df) - 1)]}"
+    if len(neg) and len(paid):
+        s += f"; earned back in {int(paid.year.iloc[0])}"
+    return s + f"; {_e(df.cumulative_eur.iloc[-1])} at the end of their life."
 
 
 def _kiln_month(df):
-    return "Free firing days per month and kiln size (with the battery)."
+    return "Free firing days per month and kiln size (surplus solar only)."
 
 
 def _energieknl(df):
@@ -239,6 +247,7 @@ RULES = [
     (r"best_per_size_class", _size_class),
     (r"contract_and_battery_combinations", _combos),
     (r"kiln_free_firing_days", _kiln),
+    (r"solar_saving_per_year", _solar),
     (r"free_days_per_month", _kiln_month),
     (r"energieknl", _energieknl),
 ]
