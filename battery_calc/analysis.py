@@ -1962,11 +1962,15 @@ class Analysis:
         return self.cheapest_dynamic() or self.current
 
     def combination_table(self, b):
-        """Yearly cost from 2027 (last 3 price years) for current/cheapest contract, with and without battery."""
+        """Yearly cost from 2027 (last 3 price years) for the current contract, the cheapest new fixed
+        offer and the cheapest dynamic contract, each with and without the battery."""
         e = getattr(self, "expected_by_contract", {}) or {}
         rec = self.records
         rows = []
-        for c in [x for x in (self.current, self.cheapest_dynamic()) if x is not None]:
+        offers = [c for c in self.contracts if not c.is_dynamic and c is not self.current
+                  and e.get(c.id, {}).get("nosal_min50") is not None]
+        best_fixed = min(offers, key=lambda c: e[c.id]["nosal_min50"]) if offers else None
+        for c in [x for x in (self.current, best_fixed, self.cheapest_dynamic()) if x is not None]:
             base = e.get(c.id, {}).get("nosal_min50")
             if base is None:
                 continue

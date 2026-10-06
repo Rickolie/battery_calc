@@ -34,6 +34,7 @@ class Contract:
     netting_method: str = "tariff_blocks"    # fixed: tariff_blocks; dynamic: spot_kwh_net
     post2027_feed_in: float | None = None
     post2027_feed_in_cost_tiers: list | None = None
+    post2027_feed_in_cost_kwh: float | None = None   # per-kWh feed-in cost from 2027, if it differs
     source: str = ""
     retrieved_at: str = ""
     verified: bool = False
@@ -56,6 +57,11 @@ class Contract:
             return self.price_single
         vals = [v for v in (self.price_t1, self.price_t2) if v is not None]
         return sum(vals) / len(vals) if vals else 0.0
+
+    def feed_in_cost_per_kwh(self, post2027: bool = False) -> float:
+        if post2027 and self.post2027_feed_in_cost_kwh is not None:
+            return self.post2027_feed_in_cost_kwh
+        return self.feed_in_cost_kwh
 
     def feed_in_cost_year(self, export_kwh: float, post2027: bool = False) -> float:
         tiers = self.post2027_feed_in_cost_tiers if (post2027 and self.post2027_feed_in_cost_tiers) \
@@ -218,6 +224,7 @@ def load_contracts_csv(source) -> list[Contract]:
             netting_method=r.get("netting_method") or ("spot_kwh_net" if typ == "dynamic" else "tariff_blocks"),
             post2027_feed_in=_f(r.get("post2027_feed_in_eur_kwh_excl_vat")),
             post2027_feed_in_cost_tiers=tiers_from_text(r.get("post2027_feed_in_cost_tiers")) or None,
+            post2027_feed_in_cost_kwh=_f(r.get("post2027_feed_in_cost_eur_kwh_excl_vat")),
             source=r.get("source_url", ""), retrieved_at=r.get("retrieved_at", ""),
             verified=str(r.get("verified", "")).lower() in ("yes", "true", "1"),
             notes=r.get("notes", ""),

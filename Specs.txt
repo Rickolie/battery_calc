@@ -594,3 +594,12 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - the yearly bars stack the battery's extra saving;
   - the cumulative chart shows "Panels only" and "Panels + battery". The second line drops by the battery price on the purchase date, and each line marks its own payback point.
 - **Text:** the section text and key finding give both payback years.
+
+### 11.18 Essent fixed offer in all comparisons (2026-10-06)
+
+- **Added to `data/online/contracts.csv`:** Essent "Groene Stroom 1 jaar" (`fix_essent_groene_1j`, fixed, 12 months, welcome bonus €450).
+  - Prices incl. VAT are converted to kale excl. VAT: incl. ÷ 1.21 − 2026 energy tax. Fixed delivery €0.37235/day incl. VAT.
+  - Until 2027: saldering; surplus paid €0.15/kWh (no VAT); feed-in costs €1.64732/day.
+  - From 2027: feed-in €0.0868/kWh (the offer's −0.08680 is a credit and equals the 50% legal minimum); feed-in costs €0.056/kWh (assumed incl. VAT).
+- **New contract field** `post2027_feed_in_cost_eur_kwh_excl_vat`: a per-kWh feed-in cost that applies only from 2027, used by the cost engine and the marginal values for battery decisions.
+- **Appears in:** the contract rankings, the battery payback runs (all fixed contracts are simulated) and the advice's combination table. That table now lists current contract, cheapest new fixed offer and cheapest dynamic contract, each with and without the battery.
