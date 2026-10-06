@@ -372,6 +372,28 @@ def test_full_run_both_regimes_and_analyses(tmp_path):
     assert "<details class='sec'>" in h and "<details class='tblw'>" in h
 
 
+def test_run_survives_without_scipy(tmp_path, monkeypatch):
+    """Some browsers cannot load Pyodide's scipy BLAS: LP strategies are skipped, not fatal."""
+    import battery_calc.battery as B
+    monkeypatch.setattr(B, "_LP_OK", False)
+    for y in (2024, 2025):
+        write_year(str(tmp_path), y, "comma_kwh")
+    bat = tmp_path / "b.csv"
+    src = pd.read_csv(os.path.join(ROOT, "data", "online", "batteries.csv"), dtype=str).iloc[[0]]
+    src["price_nl_incl_vat"] = "1200"
+    src.to_csv(bat, index=False)
+    cfg = dict(CFG)
+    cfg["paths"] = dict(CFG["paths"], price_glob=str(tmp_path / "jeroen_*.csv"), results_dir=str(tmp_path / "res"))
+    cfg["strategies"] = dict(CFG["strategies"], enabled=["self_consumption", "forecast", "perfect_foresight",
+                                                         "curtail"])
+    an = Analysis(cfg, Inputs(batteries_csv=str(bat)), Options(plots=False, quick=True), log=None)
+    secs = {s.id: s for s in an.run()}
+    strategies = set(an.records.strategy)
+    assert "forecast" not in strategies and "forecast_curtail" not in strategies
+    assert "perfect_foresight" in strategies and "self_consumption_curtail" in strategies
+    assert "Optimiser not available" in secs["payback"].md
+
+
 def test_hbc_extreme_pair_matching():
     from battery_calc.battery import CHARGE_PV, GRID_CHARGE, plan_hbc
     idx = pd.date_range("2025-01-06", periods=96, freq="15min", tz="Europe/Amsterdam")

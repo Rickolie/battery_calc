@@ -459,6 +459,23 @@ def plan_hbc(index: pd.DatetimeIndex, price: np.ndarray, cfg: dict) -> np.ndarra
     return modes
 
 
+_LP_OK: bool | None = None
+
+
+def lp_available() -> bool:
+    """True when scipy's LP solver (HiGHS) can be imported. In some browsers the
+    Pyodide build of scipy fails to load its BLAS library; the LP-based strategies
+    are then skipped instead of crashing the whole run."""
+    global _LP_OK
+    if _LP_OK is None:
+        try:
+            from scipy.optimize import linprog  # noqa: F401
+            _LP_OK = True
+        except Exception:                   # ImportError, or a failing shared library
+            _LP_OK = False
+    return _LP_OK
+
+
 def perfect_foresight(net: np.ndarray, u: np.ndarray, s: np.ndarray, b: Battery, power_cap_w: float,
                       wear: float = 0.0, levels: int = 21, grid_charge: bool = True, sell: bool = True) -> SimResult:
     """Upper bound on bill savings: all prices and flows known in advance.
@@ -469,10 +486,9 @@ def perfect_foresight(net: np.ndarray, u: np.ndarray, s: np.ndarray, b: Battery,
     the house's own load (used to show where the upper bound's value comes from)."""
     if not (grid_charge and sell):
         return _perfect_lp(net, u, s, b, power_cap_w, wear, grid_charge=grid_charge, sell=sell)
-    try:
+    if lp_available():
         return _perfect_lp(net, u, s, b, power_cap_w, wear)
-    except ImportError:
-        return _perfect_dp(net, u, s, b, power_cap_w, wear, levels)
+    return _perfect_dp(net, u, s, b, power_cap_w, wear, levels)
 
 
 def _perfect_lp(net, u, s, b: Battery, power_cap_w: float, wear: float,

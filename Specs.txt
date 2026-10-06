@@ -572,3 +572,13 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - The shortlist adds the Marstek Venus A 6.36 kWh, so it holds 14 batteries with at least two per class.
   - When a bigger class is cheaper than the next smaller one, its "payback of the extra" is 0.
 - **Settings text:** the battery choice explains that one battery per size class is followed, and that a picked battery replaces its class's winner and becomes the recommendation.
+
+### 11.16 Browsers where scipy cannot load (2026-10-06)
+
+- In some browsers Pyodide's scipy fails to load its BLAS library (`_fblas … bad export type`), and the run crashed in the `forecast` strategy.
+- The analysis now checks once whether scipy's LP solver can be imported. If not:
+  - `forecast` and `forecast_curtail` are skipped;
+  - the gap-to-perfect-foresight table is left out;
+  - `perfect_foresight` uses its slower discretised approximation;
+  - the payback section says so and suggests another browser or the command line.
+- The same site build works in Chromium, both on a page and in the Web Worker the site uses.
