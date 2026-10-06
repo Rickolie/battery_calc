@@ -14,6 +14,7 @@ import pandas as pd
 
 from . import charts, extras
 from .battery import (BEST_PRICE, GRID_CHARGE, SELF, ZERO_IMPORT, Battery, curtail, in_scope, load_batteries,
+                      lp_available,
                       perfect_foresight, plan_dynamic, plan_forecast, plan_hbc, plan_timed, simulate)
 from .breakeven import breakeven_rows, wear_cost
 from .report import slug
@@ -836,7 +837,8 @@ class Analysis:
         if c.is_dynamic:
             presets = self.cfg.get("strategies", {}).get("hbc_presets", {}) or {}
             out += [s for s in enabled
-                    if s in ("dynamic", "dynamic_sell", "forecast", "perfect_foresight") or s in presets]
+                    if s in ("dynamic", "dynamic_sell", "perfect_foresight") or s in presets
+                    or (s == "forecast" and lp_available())]
             # Curtailment only matters where export can be worth less than nothing (dynamic prices).
             if "curtail" in enabled:
                 bases = self.cfg.get("strategies", {}).get("curtail", {}).get("bases", ["self_consumption", "forecast"])
@@ -1023,6 +1025,11 @@ class Analysis:
                f"{float(self.cfg['analysis'].get('discount_rate', 0.03)):.0%} a year."]
         if self.prices is None:
             md.append("**No price history loaded:** only fixed-contract combinations were simulated.")
+        if not lp_available():
+            md.append("**Optimiser not available in this browser** (scipy could not load its maths library): the "
+                      "`forecast` strategies and the gap analysis are skipped, and `perfect_foresight` uses a slower "
+                      "approximation. Try another browser (Chrome, Edge or Firefox on a computer) or the command line "
+                      "for the full results.")
         estimated = [b.name for b in self.batteries if b.estimated]
         if estimated:
             md.append(f"- Estimated specs (defaults used): {', '.join(estimated)}.")
@@ -1442,7 +1449,7 @@ class Analysis:
         latest full price year): the same optimiser with less knowledge, and perfect
         foresight with fewer freedoms."""
         c = self.cheapest_dynamic()
-        if c is None or not getattr(self, "focus", None) or not self.head_years:
+        if c is None or not getattr(self, "focus", None) or not self.head_years or not lp_available():
             return None
         scn, year = "nosal_min50", self.head_years[-1]
         pers = self.periods(c, scn, [year])
