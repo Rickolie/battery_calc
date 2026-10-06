@@ -61,6 +61,13 @@ taxes:
   vat: 0.21
   escalation_pct: 0.0
   years:
+    2024:
+      # Used only for the solar-panel years 2024 (section 11).
+      energy_tax_eur_kwh: 0.10880
+      tax_reduction_eur_year: 521.81
+      source_url: https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/overige_belastingen/belastingen_op_milieugrondslag/tarieven_milieubelastingen/tabellen_tarieven_milieubelastingen
+      retrieved_at: '2026-10-06'
+      verify: true
     2025:
       energy_tax_eur_kwh: 0.10154
       tax_reduction_eur_year: 524.95
@@ -230,6 +237,23 @@ battery_set: all
 battery_shortlist: [marstek_v3_5, marstek_v3_5_plug, marstek_v3_10, marstek_v3_15, marstek_venus_a_4, anker_max_7,
                     anker_max_14, ecoflow_stream_5, ecoflow_stream_10, indevolt_sf3000_5, hoymiles_4020,
                     homewizard_2_7, zendure_2400acplus_5]
+
+# Section 11: what the solar panels earn, year by year, with the actual
+# contracts: the fixed contract (vast.txt, saldering) until fixed_contract_until,
+# then the cheapest dynamic contract (2027-2029 rules, then 2030+ rules).
+# Without PV data, production is modelled from kwp (clear-sky shape per 15 min,
+# scaled per day to cover the measured export, yearly total = kwp x yield).
+solar:
+  install_date: '2024-07-01'
+  price_eur: null                # total paid (panels, inverter, installation, after VAT refund)
+  kwp: null                      # system size; null = estimate from export (self_share_if_unknown)
+  yield_kwh_per_kwp: 900         # typical Dutch yearly yield
+  self_share_if_unknown: 0.30    # share of production used in the house, only when kwp is unknown
+  degradation_pct_per_year: 0.5
+  lifetime_years: 25
+  fixed_contract_until: '2027-01-01'
+  latitude: 52.1
+  longitude: 5.1
 
 # Objective 4: pottery kiln on free power (Specs.txt 11.6). Assumptions, edit
 # to the kiln's data sheet: a firing to maximum temperature (~1250-1300 C)

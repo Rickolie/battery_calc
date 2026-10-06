@@ -191,3 +191,43 @@ def daily_battery(index, net, batt_ac, soc, usable, standby_kwh):
     out["full"] = out.max_soc_kwh >= 0.98 * usable
     out.index = pd.to_datetime(out.index)
     return out
+
+
+# ---------------------------------------------------------------- solar production estimate
+
+def clear_sky_shape(index, lat: float = 52.1, lon: float = 5.1) -> np.ndarray:
+    """Relative clear-sky production per interval (sun elevation based, ≥ 0)."""
+    t = pd.DatetimeIndex(index).tz_convert("UTC")
+    t = t - pd.Timedelta(minutes=7.5)                      # middle of a 15-minute interval
+    doy = t.dayofyear.values
+    hour = t.hour.values + t.minute.values / 60.0
+    decl = np.radians(23.44) * np.sin(2 * np.pi * (284 + doy) / 365.0)
+    ha = np.radians(15.0 * (hour + lon / 15.0 - 12.0))
+    la = np.radians(lat)
+    sin_el = np.sin(la) * np.sin(decl) + np.cos(la) * np.cos(decl) * np.cos(ha)
+    return np.clip(sin_el, 0, None) ** 1.3
+
+
+def pv_estimate(index, exp: np.ndarray, kwp: float | None, yield_kwh_kwp: float = 900.0,
+                self_share: float = 0.30, lat: float = 52.1, lon: float = 5.1) -> tuple[np.ndarray, float, bool]:
+    """Production per interval (kWh) from the measured export: each day takes the
+    clear-sky shape, scaled so it covers that day's export (the export envelope
+    shows how sunny the day was); the year is then scaled to kwp × yield, never
+    below the export itself. Without kwp: yearly production = export ÷ (1 − self_share).
+    Returns (production, kwp used, kwp_estimated)."""
+    exp = np.asarray(exp, dtype=float)
+    cs = clear_sky_shape(index, lat, lon)
+    day = pd.DatetimeIndex(index).normalize()
+    df = pd.DataFrame({"exp": exp, "cs": cs, "day": day})
+    ok = df.cs > 0.08 * df.cs.max()
+    ratio = (df.exp / df.cs.where(ok)).groupby(df.day).quantile(0.9).fillna(0.0)
+    # Overcast days without export still produce something: at least 15% of a clear day.
+    scale = np.maximum(ratio, 0.15 * ratio.quantile(0.9))
+    prod0 = df.cs.values * df.day.map(scale).values
+    estimated = not kwp
+    target = (exp.sum() / max(1e-9, 1.0 - self_share)) if estimated else float(kwp) * yield_kwh_kwp
+    target *= len(exp) / 35040.0                         # part of a year
+    k = target / max(prod0.sum(), 1e-9)
+    prod = np.maximum(prod0 * k, exp)
+    kwp_used = float(kwp) if kwp else exp.sum() / max(1e-9, 1.0 - self_share) / yield_kwh_kwp
+    return prod, kwp_used, estimated

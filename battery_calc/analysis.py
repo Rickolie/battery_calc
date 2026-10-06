@@ -112,6 +112,7 @@ class Analysis:
         self.step_payback()          # also emits section 8 (break-even with simulated cycles)
         self.step_sanity()
         self.step_kiln()
+        self.step_solar()
         self.step_advice()
         return self.sections
 
@@ -1497,78 +1498,223 @@ class Analysis:
         hours, duty = float(k.get("firing_hours", 8)), float(k.get("avg_duty", 0.7))
         starts, tol = [int(h) for h in k.get("start_hours", [7, 8, 9, 10])], float(k.get("free_tolerance", 0.05))
         price = self.avg_prices()[0]["nosal_min50"][0]
+        # Surplus solar only: the measured export, no battery.
         nb = extras.kiln_days(self.profile, None, 0, None, powers, hours, duty, starts, tol)
-        focus = getattr(self, "focus", None) or []
-        if not focus and getattr(self, "chosen", None) is not None:
-            focus = [{"cls": self.class_of(self.chosen)[0] or "battery", "color": self.CLASS_COLORS[0],
-                      "b": self.chosen}]
-        net = (self.profile["imp"] - self.profile["exp"]).values
-        per_cls = {}
-        for f in focus:
-            b = f["b"]
-            cap = self.conn.battery_cap_w(b.phases)
-            r = simulate(net, SELF, b, cap, keep_trace=True)
-            per_cls[f["cls"]] = extras.kiln_days(self.profile, b, cap, np.concatenate([[0.0], r.soc[:-1]]),
-                                                 powers, hours, duty, starts, tol)
         rows = []
         for p, g in nb.groupby("kiln_kw"):
-            row = {"kiln_kw": p, "firing_kwh": g.firing_kwh.iloc[0], "free_days_no_battery": int(g.free.sum())}
-            for cls, wb in per_cls.items():
-                row[f"free_days_{slug(cls)}"] = int(wb[wb.kiln_kw == p].free.sum())
-            row["avg_cost_per_firing_no_battery"] = g.grid_kwh.mean() * price
-            for cls, wb in per_cls.items():
-                row[f"avg_cost_per_firing_{slug(cls)}"] = wb[wb.kiln_kw == p].grid_kwh.mean() * price
-            rows.append(row)
+            rows.append({"kiln_kw": p, "firing_kwh": g.firing_kwh.iloc[0], "free_days": int(g.free.sum()),
+                         "avg_grid_kwh_per_firing": g.grid_kwh.mean(),
+                         "avg_cost_per_firing": g.grid_kwh.mean() * price,
+                         "months_with_free_days": ", ".join(self.MONTHS[m - 1]
+                                                            for m in sorted(g[g.free].month.unique()))})
         summ = pd.DataFrame(rows)
         sec.tables["kiln_free_firing_days"] = summ.round(2)
-        ch = getattr(self, "chosen", None)
-        ch_cls = next((f["cls"] for f in focus if ch is not None and f["b"].id == ch.id),
-                      focus[0]["cls"] if focus else None)
-        if ch_cls is not None:
-            wb = per_cls[ch_cls]
-            by_month = wb[wb.free].groupby(["kiln_kw", "month"]).size().unstack(fill_value=0)
-            by_month = by_month.reindex(columns=range(1, 13), fill_value=0)
-            by_month = by_month.loc[:, by_month.sum() > 0]
-            by_month.columns = [self.MONTHS[m - 1] for m in by_month.columns]
-            sec.tables[f"free_days_per_month_{slug(ch_cls)}"] = by_month
+        by_month = nb[nb.free].groupby(["kiln_kw", "month"]).size().unstack(fill_value=0)
+        by_month = by_month.reindex(columns=range(1, 13), fill_value=0)
+        by_month = by_month.loc[:, by_month.sum() > 0]
+        by_month.columns = [self.MONTHS[m - 1] for m in by_month.columns]
+        if len(by_month.columns):
+            sec.tables["free_days_per_month"] = by_month
         sec.interactive["kiln_days"] = {
             "kind": "bars", "unit": "days", "yLabel": "free firing days per year",
-            "title": "Free firing days per year, by kiln power and battery size",
+            "title": "Free firing days per year on surplus solar, by kiln power",
             "subtitle": f"A firing needs rated kW × {hours * duty:g} kWh ({hours:g} h at {duty:.0%} average power) with at "
-                        f"most {tol:.0%} from the grid; one firing per day.",
+                        f"most {tol:.0%} from the grid; one firing per day; no battery.",
             "categories": [f"{p:g} kW" for p in summ.kiln_kw],
-            "series": [{"label": "No battery", "color": "#a3a29d", "values": summ.free_days_no_battery.tolist()}]
-                      + [{"label": f"{f['cls']}: {self.short_name(f['b'])}", "color": f["color"],
-                          "values": summ[f"free_days_{slug(f['cls'])}"].tolist()} for f in focus]}
-        best = summ[summ.filter(like="free_days_").max(axis=1) > 0]
+            "series": [{"label": "Free firing days", "color": "#2a78d6", "values": summ.free_days.tolist()}]}
+        good = summ[summ.free_days >= 20]
+        if len(good):
+            g = good.iloc[-1]
+            sec.summary = (f"A kiln up to {g.kiln_kw:g} kW fires on surplus solar alone on {int(g.free_days)} days a "
+                           f"year ({g.months_with_free_days}).")
         md = ["`firing energy = kiln kW × firing hours × average power share`",
-              "`free day` = the whole firing runs on solar surplus (plus the battery) with at most "
+              "`free day` = the whole firing runs on solar surplus (what you would otherwise export) with at most "
               f"{tol:.0%} from the grid",
               f"`cost per firing = grid kWh × €{price:.3f}` (average all-in import price, 2027 rules)"]
-        if focus and ch_cls is not None:
-            col = "free_days_" + slug(ch_cls)
-            good = summ[summ[col] >= 20]
-            if len(good):
-                g = good.iloc[-1]
-                sec.summary = (f"A kiln up to {g.kiln_kw:g} kW fires on free power on {int(g[col])} days a year with the "
-                               f"{ch_cls} battery ({int(g.free_days_no_battery)} without a battery).")
-        if len(best):
-            last = best.iloc[-1]
-            parts = [f"no battery {int(last.free_days_no_battery)}"]
-            for f in focus:
-                parts.append(f"{f['cls']} {int(last['free_days_' + slug(f['cls'])])}")
-            md.append(f"- Largest kiln with free days: **{last.kiln_kw:g} kW** – {', '.join(parts)} days a year.")
+        md += [f"- **{r.kiln_kw:g} kW:** {r.free_days} free days" for r in summ.itertuples() if r.free_days > 0][:6]
         md += ["#### Assumptions",
                f"- A firing to maximum temperature takes {hours:g} h at {duty:.0%} of rated power on average "
-               "(config.yaml `kiln`; edit to your kiln's data sheet). Start hour chosen per day among "
-               f"{starts}.",
-               "- The battery starts each day at the charge it would have had with normal self-consumption.",
-               f"- Solar used for the kiln is not entirely free: from 2027 each kWh gives up about "
+               f"(config.yaml `kiln`; edit to your kiln's data sheet). Start hour chosen per day among {starts}.",
+               "- Only surplus solar is used: no battery, so the battery results elsewhere are unaffected.",
+               f"- Surplus solar is not entirely free: from 2027 each kWh gives up about "
                f"€{self.avg_prices()[0]['nosal_min50'][1]:.3f} of feed-in compensation.",
                "- Kilns above 3.68 kW (16 A) need a three-phase or dedicated high-current group; "
                + ("left out on this single-phase connection." if one_phase else
                   f"your {self.conn.label} connection allows them.")]
         sec.md = "\n".join(md)
+        self.emit(sec)
+
+    # ------------------------------------------------------------------ 11. solar panels
+    def step_solar(self):
+        sec = Section("solar", "11. Solar panels: yearly saving and payback")
+        sc = dict(self.cfg.get("solar", {}) or {})
+        pr = self.profile
+        imp, exp = pr["imp"].values, pr["exp"].values
+        if self.pv is not None:
+            prod = np.maximum(self.pv.fillna(0).values, exp)
+            kwp, est, src = sc.get("kwp"), False, "your PV production file"
+        else:
+            prod, kwp, est = extras.pv_estimate(pr.index, exp, sc.get("kwp"), float(sc.get("yield_kwh_per_kwp", 900)),
+                                                float(sc.get("self_share_if_unknown", 0.3)),
+                                                float(sc.get("latitude", 52.1)), float(sc.get("longitude", 5.1)))
+            src = (f"estimated: {kwp:.1f} kWp " + ("(guessed from your export – set the real kWp)" if est
+                                                   else "(your setting)") + " with a clear-sky model")
+        self_used = prod - exp                                  # solar used in the house (kWh per interval)
+        month_share = pd.Series(prod, index=pr.index).groupby(pr.index.month).sum()
+        month_share = month_share / month_share.sum()
+        install = pd.Timestamp(sc.get("install_date", "2024-07-01"))
+        fixed_until = pd.Timestamp(sc.get("fixed_contract_until", "2027-01-01"))
+        life = int(sc.get("lifetime_years", 25))
+        deg = float(sc.get("degradation_pct_per_year", 0.5)) / 100.0
+        price = sc.get("price_eur")
+        price = float(price) if price not in (None, "") else None
+        dyn = self.cheapest_dynamic()
+        fixed = self.current
+
+        def saving_for(year):
+            """(contract label, rules label, € saved in a full year)"""
+            when = pd.Timestamp(year=year, month=7, day=1)
+            if when < fixed_until and fixed is not None:
+                per = Period(imp, exp, pr["is_low"].values, None, len(imp) / 96.0, year)
+                scn = "saldering"
+                c = fixed
+                with_ = compute_cost(per, c, self.regimes[scn], self.taxes, self.conn.label, include_fixed=False).total
+                without = compute_cost(per.with_flows(imp + self_used, np.zeros_like(exp)), c, self.regimes[scn],
+                                       self.taxes, self.conn.label, include_fixed=False).total
+                return c.label, f"saldering ({year} energy tax)", without - with_
+            c = dyn or fixed
+            if c is None:
+                return "–", "–", np.nan
+            scn = regime_for_year(self.cfg, max(year, 2027))
+            vals = []
+            for label, per, idx, _ in self.periods(c, scn, self.head_years if c.is_dynamic else None):
+                su = self_used if label == "profile" else self_used[self.results[("replay", label)][1]]
+                w = compute_cost(per, c, self.regimes[scn], self.taxes, self.conn.label, include_fixed=False).total
+                wo = compute_cost(per.with_flows(per.imp + su, np.zeros_like(per.exp)), c, self.regimes[scn],
+                                  self.taxes, self.conn.label, include_fixed=False).total
+                vals.append(wo - w)
+            return c.label, self.regimes[scn]["label"], float(np.mean(vals)) if vals else np.nan
+
+        cache, rows = {}, []
+        end = install + pd.DateOffset(years=life)
+        cum = -(price or 0.0)
+        for year in range(install.year, end.year + 1):
+            a = max(install, pd.Timestamp(year=year, month=1, day=1))
+            z = min(end, pd.Timestamp(year=year + 1, month=1, day=1))
+            if z <= a:
+                continue
+            months = pd.date_range(a, z - pd.Timedelta(days=1), freq="D").month.unique()
+            share = float(month_share.reindex(months).fillna(0).sum())
+            key = "fixed" if pd.Timestamp(year=year, month=7, day=1) < fixed_until and fixed is not None \
+                else regime_for_year(self.cfg, max(year, 2027))
+            if key == "fixed":
+                key = ("fixed", year)               # energy tax differs per year
+            if key not in cache:
+                cache[key] = saving_for(year)
+            label, rules, full = cache[key]
+            if isinstance(key, tuple):
+                rules = f"saldering ({year} energy tax)"
+            age = max(0.0, (pd.Timestamp(year=year, month=7, day=1) - install).days / 365.0)
+            s = full * share * (1 - deg) ** age
+            cum += s
+            rows.append({"year": year, "contract": label, "rules": rules, "share_of_year": share,
+                         "production_kwh": prod.sum() * share * (1 - deg) ** age,
+                         "self_used_kwh": self_used.sum() * share * (1 - deg) ** age,
+                         "exported_kwh": exp.sum() * share * (1 - deg) ** age,
+                         "saving_eur": s, "cumulative_eur": cum})
+        df = pd.DataFrame(rows)
+        sec.tables["solar_saving_per_year"] = df.round(2)
+        payback_year = None
+        if price:
+            prev = -price
+            for r in df.itertuples():
+                if r.cumulative_eur >= 0 > prev:
+                    frac = -prev / r.saving_eur if r.saving_eur else 0
+                    a = max(install, pd.Timestamp(year=r.year, month=1, day=1))
+                    payback_year = a.year + (a.dayofyear - 1) / 365.0 + frac * r.share_of_year
+                    break
+                prev = r.cumulative_eur
+        today = pd.Timestamp.now(tz=None).normalize()
+        so_far = df[df.year < today.year].saving_eur.sum()
+        cur = df[df.year == today.year]
+        if len(cur) and today > install:
+            start = max(install, pd.Timestamp(year=today.year, month=1, day=1))
+            months = pd.date_range(start, today - pd.Timedelta(days=1), freq="D").month.unique()
+            done = float(month_share.reindex(months).fillna(0).sum())
+            so_far += float(cur.saving_eur.iloc[0]) * done / max(float(cur.share_of_year.iloc[0]), 1e-9)
+        fixed_rows = df[df.contract == (fixed.label if fixed else "")]
+        dyn_rows = df[(df.contract != (fixed.label if fixed else "")) & (df.share_of_year > 0.99)]
+        f_full = fixed_rows[fixed_rows.share_of_year > 0.99].saving_eur.mean() if len(fixed_rows) else np.nan
+        d_full = dyn_rows.saving_eur.iloc[0] if len(dyn_rows) else np.nan
+        sec.summary = (f"The panels save about €{f_full:,.0f} a year on the fixed contract (saldering) and "
+                       f"€{d_full:,.0f} a year from 2027 on the dynamic contract; "
+                       + (f"paid back in {payback_year:.1f}." if payback_year else
+                          "set the price paid to see the payback year." if not price else
+                          "not paid back within their lifetime."))
+        md = ["`saving = yearly cost without panels − yearly cost with panels` (same contract and rules; without "
+              "panels you would import everything the house used)",
+              "`house use = import + solar used directly`, `solar used directly = production − export`",
+              f"Contracts: **{fixed.label if fixed else '–'}** until {fixed_until.date()} (saldering), then "
+              f"**{dyn.label if dyn else '–'}** (2027–2029 rules, then 2030+ rules).",
+              f"- Production {prod.sum():,.0f} kWh a year ({src}); used directly {self_used.sum():,.0f} kWh "
+              f"({self_used.sum() / max(prod.sum(), 1e-9):.0%}), exported {exp.sum():,.0f} kWh.",
+              f"- Saved so far (from {install.date()} to today): about **€{so_far:,.0f}**."]
+        if price:
+            md.append(f"- Price paid €{price:,.0f}: " + (f"**paid back in {payback_year:.1f}**." if payback_year
+                                                          else "not paid back within the lifetime."))
+        else:
+            md.append("- **No price set:** enter what the panels cost (settings, or `solar.price_eur` in "
+                      "config.yaml) to see the payback year; the cumulative line now starts at €0.")
+        if est and self.pv is None:
+            md.append("- **kWp unknown:** set the real system size for a better production estimate.")
+        elif self.pv is None and kwp and prod.sum() > float(kwp) * float(sc.get("yield_kwh_per_kwp", 900)) * 1.05:
+            raised = prod.sum() / (float(kwp) * float(sc.get("yield_kwh_per_kwp", 900))) - 1
+            md.append(f"- **Check the kWp:** production had to be raised {raised:.0%} above {kwp:g} kWp × "
+                      f"{float(sc.get('yield_kwh_per_kwp', 900)):g} kWh to cover your measured export; the system is "
+                      "probably larger or yields more per kWp.")
+        md += ["#### Why saldering makes the panels worth more until 2027",
+               "- With saldering every exported kWh is netted against an imported kWh at the full price incl. "
+               "energy tax and VAT, so the whole production is worth the import price.",
+               "- From 2027 only solar used directly saves the full import price; exported solar earns the "
+               "(low, midday) dynamic feed-in price. A battery or shifting use to sunny hours raises the saving.",
+               "#### Assumptions",
+               f"- Every year uses your profile year (Oct 2025 – Sep 2026) for usage and export; dynamic years use "
+               f"the average of the {', '.join(map(str, self.head_years))} prices.",
+               "- The install year and the last year count only the months covered, weighted by how much the panels "
+               "produce in those months.",
+               f"- Panels lose {deg:.1%} output a year; lifetime {life} years. Fixed costs (standing charge, grid, "
+               "tax reduction) are the same with and without panels and are left out.",
+               "- Energy tax per year from config.yaml (2024, 2025, 2026; later years held flat)."]
+        sec.md = "\n".join(md)
+        cats = [str(y) for y in df.year]
+        is_fixed = df.contract == (fixed.label if fixed else "")
+        sec.interactive["solar_yearly"] = {
+            "kind": "bars", "stacked": True, "unit": "€", "yLabel": "€ saved per year", "rotate": True,
+            "title": "What the panels save each year",
+            "subtitle": "Partial first and last year count only the months covered.",
+            "categories": cats,
+            "series": [{"label": f"Fixed contract with saldering ({fixed.label if fixed else '–'})",
+                        "color": "#2a78d6", "values": [round(v, 1) if f else 0 for v, f in zip(df.saving_eur, is_fixed)]},
+                       {"label": f"Dynamic contract ({dyn.label if dyn else '–'})", "color": "#eb6834",
+                        "values": [0 if f else round(v, 1) for v, f in zip(df.saving_eur, is_fixed)]}]}
+        x = [install.year + (install.dayofyear - 1) / 365.0] + [
+            float(max(install, pd.Timestamp(year=y + 1, month=1, day=1)).year) for y in df.year[:-1]] + [
+            end.year + (end.dayofyear - 1) / 365.0]
+        vals = [-(price or 0.0)] + [round(v, 1) for v in df.cumulative_eur]
+        spec = {"kind": "lines", "unit": "€", "yLabel": "€ cumulative", "zero": True, "markers": False,
+                "title": "Cumulative: when the panels have earned themselves back" if price else
+                         "Cumulative saving of the panels",
+                "subtitle": (f"Starts at minus the price (€{price:,.0f}) on {install.date()}." if price else
+                             "No price set: starts at €0.") + " Fixed contract until 2027, dynamic after.",
+                "x": [round(v, 3) for v in x], "xFormat": "year",
+                "xNames": [f"installed {install.date()}"] + [f"1 Jan {round(v)}" for v in x[1:-1]] + ["end of life"],
+                "xTicks": list(range(install.year + 1, end.year + 1, 2)),
+                "series": [{"label": "cumulative saving − price" if price else "cumulative saving",
+                            "color": "#2a78d6", "values": vals}]}
+        if payback_year:
+            spec["points"] = [{"x": round(payback_year, 3), "y": 0, "color": "#2a78d6",
+                               "label": f"paid back {payback_year:.1f}"}]
+        sec.interactive["solar_cumulative"] = spec
         self.emit(sec)
 
     # ------------------------------------------------------------------ advice (shown first)

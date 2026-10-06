@@ -65,6 +65,9 @@ def run(settings_json: str, on_section=None, config_path: str = "config.yaml") -
     if bf.get("estimates") is not None:
         cfg.setdefault("blackfriday", {})["estimates"] = bool(bf["estimates"])
     kiln = {k: float(v) for k, v in (s.get("kiln") or {}).items() if v not in (None, "")}
+    for k, v in (s.get("solar") or {}).items():
+        if v not in (None, ""):
+            cfg.setdefault("solar", {})[k] = v if k == "install_date" else float(v)
     opts = Options(connection=s.get("connection", cfg["connection"]["default"]),
                    margin=float(s.get("margin", cfg["connection"]["margin"])),
                    price_variant=s.get("price_variant", "all"), quick=bool(s.get("quick", False)),

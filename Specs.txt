@@ -544,3 +544,19 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - the gap table (`forecast_curtail`);
   - all payback tables.
 - **Needs** an inverter Home Assistant can scale back. Part of the gain would also exist without a battery.
+
+### 11.14 Kiln on surplus only; solar panel savings and payback (2026-10-06)
+
+- **Kiln (section 10):** free firing days use surplus solar only (the measured export), with no battery. Table and chart show free days per kiln power, the months with free days and the grid cost per firing.
+- **Solar panels (new section 11):** what the panels saved each year since installation, cumulative, with the payback year.
+  - `saving = yearly cost without panels − yearly cost with panels`. Without panels the house imports everything it used: `import + solar used directly`, where `solar used directly = production − export`. Fixed costs are equal in both cases and left out.
+  - **Contracts follow Rick's situation:**
+    - the fixed contract (vast.txt) with saldering from `solar.install_date` (2024-07-01) until `solar.fixed_contract_until` (2027-01-01), with the energy tax of each year (2024, 2025, 2026);
+    - then the cheapest dynamic contract: 2027–2029 rules, then 2030+ rules, averaged over the last 3 price years.
+  - **Production:**
+    - from the PV file when present;
+    - otherwise modelled per 15 minutes from `solar.kwp`: a clear-sky shape, scaled per day to cover the measured export, with the year scaled to kWp × `yield_kwh_per_kwp` (900). Production is never below the export.
+    - Without kWp: production = export ÷ (1 − 30% self-use), flagged as a guess.
+  - **Partial years and ageing:** the first and last year count only the months covered, weighted by monthly production. Output degrades 0.5% a year over a 25-year life.
+  - **Cumulative chart:** starts at −`solar.price_eur` on the install date and crosses zero in the payback year. Without a price it starts at €0 and the section asks for the price. A yearly bar chart shows fixed (saldering) and dynamic years in separate colours.
+  - **Settings:** price, kWp and install date are fields on the website and in config.yaml (`solar`).

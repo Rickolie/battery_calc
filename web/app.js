@@ -103,6 +103,7 @@ const SECTIONS = [
   ["breakeven_recomputed", "8. Break-even with simulated cycles"],
   ["sanity", "9. Battery over the year – check per size"],
   ["kiln", "10. Pottery kiln on free power"],
+  ["solar", "11. Solar panels: yearly saving and payback"],
 ];
 
 function renderToc() {
@@ -138,6 +139,7 @@ $("run").onclick = () => {
     battery_set: $("bset").value, chosen_battery: $("chosen").value,
     blackfriday: { discount_nl: pct("bfnl"), discount_de: pct("bfde"), estimates: $("bfest").checked },
     kiln: { firing_hours: num("kh"), avg_duty: pct("kd") },
+    solar: { price_eur: num("pvprice"), kwp: num("pvkwp"), install_date: $("pvdate").value || null },
   };
   worker.postMessage({ cmd: "run", settings });
 };
