@@ -40,6 +40,7 @@ GLOSSARY = {
     "avg_cost_per_firing_fixed": "Average grid cost per firing at the cheapest fixed offer's price (€).",
     "saving_if_fixed_eur": "What the panels would save that year if you take the cheapest fixed offer from 2027 instead of dynamic (€).",
     "cumulative_if_fixed_eur": "Running total for that fixed-contract alternative, minus the panel price (€).",
+    "price_used_eur": "The purchase price every calculation uses: today's NL price, or with German prices on the cheaper of NL (incl. VAT) and DE (0% VAT + travel) (€).",
     "full_year": "True for a complete ownership year; the partial purchase year and partial last year are False.",
     "charged_kwh": "Energy put into the battery in the profile year (kWh, AC side).",
     "delivered_kwh": "Energy delivered by the battery in the profile year (kWh, AC side).",

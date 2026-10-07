@@ -556,6 +556,13 @@ class Analysis:
                 self.batteries.append(b)
             else:
                 self.excluded.append((b, note))
+            # the price every calculation uses: NL, or the cheaper of NL/DE with German prices on
+            dtravel = float(self.cfg.get("battery_defaults", {}).get("de_travel_cost_eur", 0.0))
+            if self.use_de:
+                ref_p, ref_src = b.best_price(dtravel)
+            else:
+                ref_p = None if b.price_nl is None else b.price_nl + b.extra_hardware
+                ref_src = "NL" if ref_p is not None else ""
             rows.append({"id": b.id, "battery": b.name, "size_class": self.class_of(b)[0] or "other",
                          "type": b.type, "phases": b.phases,
                          "usable_kwh": round(b.usable_kwh, 2), "max_charge_w": b.max_charge_w,
@@ -565,8 +572,9 @@ class Analysis:
                          "eol_capacity": b.eol_capacity, "warranty_years": b.warranty_years,
                          "warranty_mwh": b.warranty_mwh, "price_nl": b.price_nl, "price_nl_lowest": b.price_nl_lowest,
                          "price_de": b.price_de, "extra_hw": b.extra_hardware,
-                         "eur_per_kwh_nominal": round(b.price_nl / b.nominal_kwh) if b.price_nl and b.nominal_kwh else None,
-                         "eur_per_kwh_usable": round(b.price_nl / b.usable_kwh) if b.price_nl and b.usable_kwh else None,
+                         "price_used_eur": ref_p, "bought_in": ref_src,
+                         "eur_per_kwh_nominal": round(ref_p / b.nominal_kwh) if ref_p and b.nominal_kwh else None,
+                         "eur_per_kwh_usable": round(ref_p / b.usable_kwh) if ref_p and b.usable_kwh else None,
                          "solar_during_outage": b.outage_solar or "unknown", "dc_solar_input_w": b.dc_solar_w,
                          "missing_fields": ", ".join(b.missing_fields), "estimated_with_defaults": ", ".join(b.estimated_fields),
                          "verified": "yes" if b.verified else "no", "in_scope": "yes" if ok else "no", "note": note})
@@ -1908,8 +1916,10 @@ class Analysis:
                             "(section 4).")
         if bat is not None:
             extra = df[df.year >= 2027].battery_saving_eur
+            src = self.chosen.best_price(float(self.cfg.get("battery_defaults", {}).get("de_travel_cost_eur", 0)))[1] \
+                if self.use_de else "NL"
             md.append(f"- **With the {bname}** (bought {pd.Timestamp(self.cfg['analysis']['purchase_date']).date()} for "
-                      f"€{bprice:,.0f}): it adds about €{extra[extra > 0].iloc[:3].mean():,.0f} a year from 2027 on "
+                      f"€{bprice:,.0f}{' in Germany' if src == 'DE' else ''}): it adds about €{extra[extra > 0].iloc[:3].mean():,.0f} a year from 2027 on "
                       "top of the panels" + (f"; panels and battery together are paid back in **{pb2:.1f}** "
                                              f"(panels alone {payback_year:.1f})." if price and pb2 and payback_year
                                              else "."))
