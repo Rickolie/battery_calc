@@ -453,21 +453,48 @@ class Analysis:
                                           "expected": costs[y][0].total, "min": np.nan, "max": np.nan})
             if grows:
                 sec.tables["Full history by year group"] = pd.DataFrame(grows).round(2)
-            # chart: top 3 dynamic vs best fixed, 2027 rules
+            # chart: the 3 cheapest dynamic contracts per price year vs the cheapest fixed offer and the
+            # current fixed contract (flat: stated tariffs), 2027 rules; one-off bonuses excluded
             scn = "nosal_min50"
             dyn = [c for c in self.contracts if c.is_dynamic]
             dyn.sort(key=lambda c: expected_by_contract.get(c.id, {}).get(scn, np.inf))
             series = {}
             for c in dyn[:3]:
                 costs = self.contract_year_costs(c, scn)
-                series[c.label] = pd.Series({y: v[0].total for y, v in sorted(costs.items())})
-            fixed = [c for c in self.contracts if not c.is_dynamic and c.id in expected_by_contract]
-            best_fixed = min(fixed, key=lambda c: expected_by_contract[c.id].get(scn, np.inf)) if fixed else None
+                series[c.label] = pd.Series({y: v[0].total - v[0].bonus_amortised for y, v in sorted(costs.items())
+                                             if y not in self.partial_years})
+            fixed = [c for c in self.contracts if not c.is_dynamic and c.id in expected_by_contract
+                     and expected_by_contract[c.id].get(scn) is not None]
+            offers = [c for c in fixed if c is not self.current] or fixed
+            best_fixed = min(offers, key=lambda c: expected_by_contract[c.id][scn]) if offers else None
             f = self.fig(charts.contract_years, series, best_fixed.label if best_fixed else None,
                          expected_by_contract[best_fixed.id].get(scn) if best_fixed else None,
                          "Yearly cost per price year (2027–2029 rules)")
             if f:
                 sec.figures["contract_years"] = f
+            years = sorted({int(y) for s in series.values() for y in s.index})
+            if years:
+                pal = ["#2a78d6", "#eb6834", "#1baf7a"]
+                lines = [{"label": f"{lab} (dynamic)", "short": lab.split(" – ")[0], "color": pal[i],
+                          "values": [round(float(s.get(y)), 0) if y in s.index else None for y in years]}
+                         for i, (lab, s) in enumerate(series.items())]
+                if best_fixed is not None:
+                    v = expected_by_contract[best_fixed.id][scn]
+                    lines.append({"label": f"{best_fixed.label} (cheapest fixed offer)", "short": "fixed offer",
+                                  "color": "#4a3aa7", "values": [round(v, 0)] * len(years)})
+                if self.current is not None and self.current is not best_fixed and self.current.id in expected_by_contract:
+                    v = expected_by_contract[self.current.id].get(scn)
+                    if v is not None:
+                        lines.append({"label": f"{self.current.label} (current, ends 2027)",
+                                      "values": [round(v, 0)] * len(years), "context": True})
+                sec.interactive["contract_years"] = {
+                    "kind": "lines", "unit": "€", "yLabel": "€ per year", "xFormat": "year", "x": years,
+                    "title": "Yearly cost without a battery: cheapest dynamic contracts vs fixed",
+                    "subtitle": "Dynamic contracts replayed on each year's day-ahead prices under the 2027–2029 "
+                                "rules; fixed contracts cost the same every year (stated tariffs). One-off bonuses "
+                                "excluded.",
+                    "endLabels": True, "contextLabel": "current fixed contract (ends 2027)", "series": lines,
+                    "height": 340}
         else:
             md.append("**Dynamic contracts are skipped:** no day-ahead price history was loaded.")
         md = ["`dynamic contract cost = Σ quarter-hours (spot + markup + energy tax) × import × 1.21 − feed-in income "
@@ -707,7 +734,8 @@ class Analysis:
                           + [{"label": f"{lab}: {r['battery']} (RTE {r['rte']:.0%}, wear €{r['wear_eur_kwh']:.3f})",
                               "short": lab, "color": color,
                               "values": [round(x / r["rte"] + r["wear_eur_kwh"], 4) for x in xs]}
-                             for lab, color, r in picks]}
+                             for lab, color, r in picks],
+                "formulas": self.breakeven_formulas(picks)}
         out_dir = self.path("results_dir")
         if out_dir and len(df) and not getattr(self, "no_write", False):
             os.makedirs(out_dir, exist_ok=True)
@@ -728,6 +756,33 @@ class Analysis:
                            "contract, 2027 rules). `setting_all_in` if the app compares prices incl. taxes, "
                            "`setting_spot` if it compares spot (EPEX) prices (= all-in ÷ 1.21).")
         self.emit(sec)
+
+    def breakeven_formulas(self, picks) -> list[dict]:
+        """Per chart line: the break-even formula in all-in prices and as a spot-price (EPEX)
+        rule with the cheapest dynamic contract's markup and energy tax – ready to use as a
+        setting in a battery app or Home Assistant."""
+        dyn = self.cheapest_dynamic()
+        vat = self.taxes.vat
+        eb = self.taxes.energy_tax(2027)
+        m = dyn.markup if dyn is not None else 0.0
+        cheap = self.typical_cheap_price()
+        out = []
+        for lab, _, r in picks:
+            rte, w = r["rte"], r["wear_eur_kwh"]
+            a = 1.0 / rte
+            b = (m + eb) * (a - 1.0) + w / (1 + vat)
+            spot_cheap = cheap / (1 + vat) - m - eb
+            be = cheap * a + w
+            out.append({"label": f"{lab}: {r['battery']}", "lines": [
+                f"Break-even (all-in €/kWh) = charge price × {a:.4f} + {w:.4f}",
+                f"Minimum price difference = charge price × {a - 1:.4f} + {w:.4f}",
+                f"Spot rule (EPEX, excl. tax): discharge/sell only if spot ≥ charge spot × {a:.4f} + {b:.4f}",
+                f"  (markup €{m:.4f} of {dyn.label if dyn else '–'}, energy tax €{eb:.4f}, VAT {vat:.0%})",
+                f"Example: charging at €{cheap:.3f} all-in (spot €{spot_cheap:.3f}) → break-even €{be:.3f} all-in,"
+                f" minimum difference €{be - cheap:.3f} all-in = €{spot_cheap * (a - 1) + b:.3f} spot (min_delta)",
+                f"Where: RTE {rte:.0%} (1/RTE = {a:.4f}); wear €{w:.4f}/kWh = €{r['purchase_eur']:,.0f} ÷ "
+                f"{r['lifetime_kwh']:,.0f} kWh over its life ({r['lifetime_limit']})"]})
+        return out
 
     def breakeven_explainer(self, rows) -> list[str]:
         """Plain-language formula with a worked example (first priced battery)."""
