@@ -603,3 +603,17 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - From 2027: feed-in €0.0868/kWh (the offer's −0.08680 is a credit and equals the 50% legal minimum); feed-in costs €0.056/kWh (assumed incl. VAT).
 - **New contract field** `post2027_feed_in_cost_eur_kwh_excl_vat`: a per-kWh feed-in cost that applies only from 2027, used by the cost engine and the marginal values for battery decisions.
 - **Appears in:** the contract rankings, the battery payback runs (all fixed contracts are simulated) and the advice's combination table. That table now lists current contract, cheapest new fixed offer and cheapest dynamic contract, each with and without the battery.
+
+### 11.19 Payback table per contract; fixed vs dynamic in every section (2026-10-07)
+
+- **`payback_ranked`** used to show only fixed contracts: the full table (every battery × contract × strategy × price variant) was cut at 60 printed rows, and batteries pay back fastest on fixed contracts.
+  - It is now compact: one row per battery × contract, with the best achievable strategy at the reference price.
+  - A new column `yearly_cost_with_battery_2027` (contract cost − battery saving) gives the cost you actually pay; rows are sorted on it.
+  - The full table is offered as the CSV `payback_all_variants`.
+- **Cheapest fixed offer vs cheapest dynamic contract, everywhere:**
+  - **4. Contracts:** table `fixed_vs_dynamic` (cheapest dynamic, cheapest fixed offer, current fixed; costs under the 2026, 2027–2029 and 2030+ rules; extra cost vs dynamic) and the key finding.
+  - **6/8. Break-even:** value and cost of a stored solar kWh, and the margin, on both contracts. A dedicated `contract_prices()` gives each contract's import-weighted import price and export-weighted feed-in value, replacing the current-contract averages used before.
+  - **7. Payback:** table `fixed_vs_dynamic_with_battery` per size class (saving, payback and yearly cost with the battery on both contracts) with an explanation of why payback is faster on fixed while the bill stays higher.
+  - **Advice:** a "If you prefer a fixed price" line with the extra cost per year.
+  - **10. Kiln:** cost per firing on the dynamic and on the fixed price.
+  - **11. Solar:** what the panels save from 2027 on the fixed offer instead, a third cumulative line and its payback year.

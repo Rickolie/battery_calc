@@ -483,6 +483,16 @@ class Analysis:
         if unverified:
             md.append(f"- Unverified contract terms (hand-entered or template): {', '.join(unverified)}.")
         self.expected_by_contract = expected_by_contract
+        fvd = self.fixed_vs_dynamic_table()
+        if fvd is not None:
+            sec.tables = {"fixed_vs_dynamic": fvd.round(0), **sec.tables}
+            line = self.fixed_vs_dynamic_line()
+            if line:
+                md.insert(2, line)
+                fx, dy = self.cheapest_fixed(), self.cheapest_dynamic()
+                sec.summary = (f"From 2027 the cheapest dynamic contract ({dy.label}) costs about "
+                               f"€{self.cost27(dy):,.0f} a year; the cheapest fixed offer ({fx.label}) "
+                               f"€{self.cost27(fx):,.0f}, €{self.cost27(fx) - self.cost27(dy):,.0f} more.")
         fv = self.feed_in_value_table()
         if fv is not None:
             sec.tables["feed_in_value_per_year"] = fv
@@ -638,6 +648,20 @@ class Analysis:
         if cycles is not None:
             md.append("Same as section 6, but with each battery's cycles per year from the simulation (section 7) "
                       "instead of the default; more cycles spread the price over more kWh, so wear drops.")
+        fp, dp = self.fixed_prices(), self.contract_prices(self.cheapest_dynamic())
+        priced_nl = [r for r in rows if r["price_variant"] == self.ref_variant and r["purchase_eur"]
+                     and not math.isnan(r["wear_eur_kwh"])]
+        if fp is not None and dp is not None and priced_nl:
+            r0 = min(priced_nl, key=lambda r: r["wear_eur_kwh"])
+            parts = []
+            for cc, u_, s_ in (fp, dp):
+                be = s_ / r0["rte"] + r0["wear_eur_kwh"]
+                parts.append(f"on {cc.label} a stored solar kWh replaces €{u_:.3f} of import and costs €{be:.3f} "
+                             f"(feed-in given up €{s_:.3f} ÷ RTE + wear) → margin €{u_ - be:.3f}")
+            md.append(f"**Fixed vs dynamic from 2027** ({r0['battery']}): " + "; ".join(parts) + ". A higher fixed "
+                      "price makes each stored kWh worth more, which is why batteries pay back faster on fixed "
+                      "contracts – but the fixed contract itself costs more (section 4). The dynamic margin is an "
+                      "average: the forecast strategy picks hours where it is much larger.")
         md += self.breakeven_explainer(rows)
         md += ["#### Reference prices",
                f"- Contract {c.label if c else 'n/a'}: average all-in import price €{avg['saldering'][0]:.3f}/kWh; "
@@ -728,6 +752,64 @@ class Analysis:
                  if y in self.head_years]
             return np.mean(v) if v else np.inf
         return min(dyn, key=key)
+
+    def cheapest_fixed(self):
+        """The cheapest fixed contract you can switch to from 2027 (a new offer; the current
+        fixed contract only when there is no other fixed offer)."""
+        e = getattr(self, "expected_by_contract", {}) or {}
+        fixed = [c for c in self.contracts if not c.is_dynamic and e.get(c.id, {}).get("nosal_min50") is not None]
+        offers = [c for c in fixed if c is not self.current] or fixed
+        return min(offers, key=lambda c: e[c.id]["nosal_min50"]) if offers else None
+
+    def cost27(self, c) -> float | None:
+        """Expected yearly cost from 2027 (2027–2029 rules, headline years; bonus excluded)."""
+        return (getattr(self, "expected_by_contract", {}) or {}).get(c.id, {}).get("nosal_min50") if c else None
+
+    def fixed_vs_dynamic_table(self) -> pd.DataFrame | None:
+        e = getattr(self, "expected_by_contract", {}) or {}
+        fx, dy = self.cheapest_fixed(), self.cheapest_dynamic()
+        rows = []
+        for role, c in (("cheapest dynamic", dy), ("cheapest fixed offer", fx), ("current fixed contract", self.current)):
+            if c is None or c.id not in e or (role == "current fixed contract" and c is fx):
+                continue
+            x = e[c.id]
+            rows.append({"role": role, "contract": c.label, "cost_2026_rules_eur": x.get("saldering"),
+                         "cost_2027_2029_eur": x.get("nosal_min50"), "cost_2030_eur": x.get("nosal_2030"),
+                         "switch_bonus_eur_once": c.welcome_bonus})
+        if not rows:
+            return None
+        df = pd.DataFrame(rows)
+        ref = df.loc[df.role == "cheapest dynamic", "cost_2027_2029_eur"]
+        if len(ref):
+            df["extra_vs_dynamic_2027_eur"] = df.cost_2027_2029_eur - ref.iloc[0]
+        return df
+
+    def contract_prices(self, c):
+        """(contract, average all-in import price weighted by your import, average export value
+        weighted by your export) under 2027–2029 rules; dynamic contracts over the last 3 price years."""
+        if c is None:
+            return None
+        key = ("cprices", c.id)
+        if key not in self.results:
+            us, ss = [], []
+            for _, per, _, _ in self.periods(c, "nosal_min50", self.head_years if c.is_dynamic else None):
+                u, s = marginal_values(per, c, self.regimes["nosal_min50"], self.taxes, self.net_importer)
+                us.append(np.average(u, weights=np.maximum(per.imp, 1e-9)))
+                ss.append(np.average(s, weights=np.maximum(per.exp, 1e-9)))
+            self.results[key] = (c, float(np.mean(us)), float(np.mean(ss))) if us else None
+        return self.results[key]
+
+    def fixed_prices(self):
+        return self.contract_prices(self.cheapest_fixed())
+
+    def fixed_vs_dynamic_line(self) -> str:
+        fx, dy = self.cheapest_fixed(), self.cheapest_dynamic()
+        a, b = self.cost27(fx), self.cost27(dy)
+        if a is None or b is None:
+            return ""
+        return (f"**Fixed vs dynamic from 2027:** cheapest fixed offer {fx.label} €{a:,.0f} a year, cheapest "
+                f"dynamic {dy.label} €{b:,.0f} – fixed costs €{a - b:,.0f} a year more (without battery, "
+                "one-off bonuses excluded).")
 
     def typical_cheap_price(self, hours: int = 4) -> float:
         c = self.cheapest_dynamic()
@@ -1040,7 +1122,13 @@ class Analysis:
             md += ["#### Timed windows found (2027 rules)"] + [f"- {w}" for w in windows]
         sec.tables["savings_by_combination"] = summary["savings"].round(2)
         if len(summary["ranked"]):
-            sec.tables["payback_ranked"] = summary["ranked"].round(2)
+            sec.tables["payback_ranked"] = self.payback_compact(summary["ranked"]).round(2)
+            sec.tables["payback_all_variants"] = summary["ranked"].round(2)
+            sec.csv_only.add("payback_all_variants")
+            fvd = self.fixed_vs_dynamic_batteries(summary["ranked"])
+            if fvd is not None:
+                sec.tables = {"fixed_vs_dynamic_with_battery": fvd.round(1), **sec.tables}
+                md.insert(3, self.fixed_vs_dynamic_battery_text(fvd))
             for name, spec in (("payback_vs_size", self.payback_scatter_spec(summary["ranked"])),
                                ("cumulative_return", self.cumulative_spec(summary["ranked"]))):
                 if spec:
@@ -1248,6 +1336,63 @@ class Analysis:
         return re.sub(r"\s*\(.*\)$", "", b.name)
 
     # ------------------------------------------------------------------ payback charts
+    def payback_compact(self, rk: pd.DataFrame) -> pd.DataFrame:
+        """One row per battery × contract (best achievable strategy, reference price, last 3
+        years), with the yearly total cost incl. the battery – so fixed and dynamic contracts
+        can be compared on what you actually pay, not only on payback time."""
+        h = rk[(rk.analysis == "headline") & (rk.price_variant == self.ref_variant) & (rk.strategy != "perfect_foresight")]
+        best = h.sort_values("payback_years").drop_duplicates(["_bid", "_cid"])
+        rows = []
+        for r in best.to_dict("records"):
+            c = next(x for x in self.contracts if x.id == r["_cid"])
+            base = self.cost27(c)
+            rows.append({"size_class": self.class_of(self.battery(r["_bid"]))[0] or "other", "battery": r["battery"],
+                         "contract": r["contract"], "contract_type": c.type, "strategy": r["strategy"],
+                         "price_eur": r["price_eur"], "bought_in": r.get("bought_in", "NL"),
+                         "saving_eur_year_2027": r["_saving27"], "payback_years": r["payback_years"],
+                         "npv_eur": r["npv_eur"],
+                         "yearly_cost_with_battery_2027": (base - r["_saving27"]) if base is not None else np.nan,
+                         "_bid": r["_bid"], "_cid": r["_cid"]})
+        df = pd.DataFrame(rows)
+        return df.sort_values(["yearly_cost_with_battery_2027", "payback_years"]).reset_index(drop=True)
+
+    def fixed_vs_dynamic_batteries(self, rk) -> pd.DataFrame | None:
+        """Per size class: the class winner on the cheapest fixed offer vs the cheapest dynamic contract."""
+        fx, dy = self.cheapest_fixed(), self.cheapest_dynamic()
+        if fx is None or dy is None or not getattr(self, "focus", None):
+            return None
+        comp = self.payback_compact(rk)
+        rows = []
+        for f in self.focus:
+            row = {"size_class": f["cls"], "battery": f["b"].name}
+            for tag, c in (("fixed", fx), ("dynamic", dy)):
+                r = comp[(comp._bid == f["b"].id) & (comp._cid == c.id)]
+                if r.empty:
+                    continue
+                r = r.iloc[0]
+                row.update({f"{tag}_strategy": r.strategy, f"{tag}_saving_eur": r.saving_eur_year_2027,
+                            f"{tag}_payback_years": r.payback_years,
+                            f"{tag}_cost_with_battery_eur": r.yearly_cost_with_battery_2027})
+            if "fixed_cost_with_battery_eur" in row and "dynamic_cost_with_battery_eur" in row:
+                row["fixed_costs_more_eur"] = row["fixed_cost_with_battery_eur"] - row["dynamic_cost_with_battery_eur"]
+            rows.append(row)
+        return pd.DataFrame(rows) if rows else None
+
+    def fixed_vs_dynamic_battery_text(self, df: pd.DataFrame) -> str:
+        fx, dy = self.cheapest_fixed(), self.cheapest_dynamic()
+        lines = [f"**Fixed vs dynamic with a battery** ({fx.label} vs {dy.label}, from 2027, per year):"]
+        for r in df.itertuples():
+            if not hasattr(r, "fixed_cost_with_battery_eur") or pd.isna(getattr(r, "fixed_cost_with_battery_eur", np.nan)):
+                continue
+            lines.append(f"- **{r.size_class}:** fixed €{r.fixed_cost_with_battery_eur:,.0f} (battery saves "
+                         f"€{r.fixed_saving_eur:,.0f}, payback {r.fixed_payback_years:.1f} yr) vs dynamic "
+                         f"€{r.dynamic_cost_with_battery_eur:,.0f} (saves €{r.dynamic_saving_eur:,.0f}, payback "
+                         f"{r.dynamic_payback_years:.1f} yr)")
+        lines.append("- A battery pays back faster on a fixed contract (exported solar is worth little there, so "
+                     "every stored kWh saves the full import price), but the fixed contract itself stays more "
+                     "expensive: compare the yearly cost, not only the payback.")
+        return "\n".join(lines)
+
     def payback_scatter_spec(self, rk):
         best = self.achievable_ranked(rk)
         best = best[np.isfinite(best.payback_years.astype(float))]
@@ -1526,14 +1671,17 @@ class Analysis:
             powers = [p for p in powers if p <= float(k.get("single_phase_max_kw", 3.68))]
         hours, duty = float(k.get("firing_hours", 8)), float(k.get("avg_duty", 0.7))
         starts, tol = [int(h) for h in k.get("start_hours", [7, 8, 9, 10])], float(k.get("free_tolerance", 0.05))
-        price = self.avg_prices()[0]["nosal_min50"][0]
+        dp = self.contract_prices(self.cheapest_dynamic())
+        price = dp[1] if dp else self.avg_prices()[0]["nosal_min50"][0]
         # Surplus solar only: the measured export, no battery.
         nb = extras.kiln_days(self.profile, None, 0, None, powers, hours, duty, starts, tol)
+        fp = self.fixed_prices()
         rows = []
         for p, g in nb.groupby("kiln_kw"):
             rows.append({"kiln_kw": p, "firing_kwh": g.firing_kwh.iloc[0], "free_days": int(g.free.sum()),
                          "avg_grid_kwh_per_firing": g.grid_kwh.mean(),
                          "avg_cost_per_firing": g.grid_kwh.mean() * price,
+                         **({"avg_cost_per_firing_fixed": g.grid_kwh.mean() * fp[1]} if fp else {}),
                          "months_with_free_days": ", ".join(self.MONTHS[m - 1]
                                                             for m in sorted(g[g.free].month.unique()))})
         summ = pd.DataFrame(rows)
@@ -1559,7 +1707,9 @@ class Analysis:
         md = ["`firing energy = kiln kW × firing hours × average power share`",
               "`free day` = the whole firing runs on solar surplus (what you would otherwise export) with at most "
               f"{tol:.0%} from the grid",
-              f"`cost per firing = grid kWh × €{price:.3f}` (average all-in import price, 2027 rules)"]
+              f"`cost per firing = grid kWh × €{price:.3f}` (average all-in import price"
+              + (f" on {dp[0].label}" if dp else "") + ", 2027 rules)"
+              + (f"; on the fixed offer {fp[0].label}: × €{fp[1]:.3f} (`avg_cost_per_firing_fixed`)" if fp else "")]
         md += [f"- **{r.kiln_kw:g} kW:** {r.free_days} free days" for r in summ.itertuples() if r.free_days > 0][:6]
         md += ["#### Assumptions",
                f"- A firing to maximum temperature takes {hours:g} h at {duty:.0%} of rated power on average "
@@ -1600,8 +1750,8 @@ class Analysis:
         dyn = self.cheapest_dynamic()
         fixed = self.current
 
-        def saving_for(year):
-            """(contract label, rules label, € saved in a full year)"""
+        def saving_for(year, after=None):
+            """(contract label, rules label, € saved in a full year); `after` = contract from 2027."""
             when = pd.Timestamp(year=year, month=7, day=1)
             if when < fixed_until and fixed is not None:
                 per = Period(imp, exp, pr["is_low"].values, None, len(imp) / 96.0, year)
@@ -1611,7 +1761,7 @@ class Analysis:
                 without = compute_cost(per.with_flows(imp + self_used, np.zeros_like(exp)), c, self.regimes[scn],
                                        self.taxes, self.conn.label, include_fixed=False).total
                 return c.label, f"saldering ({year} energy tax)", without - with_
-            c = dyn or fixed
+            c = after or dyn or fixed
             if c is None:
                 return "–", "–", np.nan
             scn = regime_for_year(self.cfg, max(year, 2027))
@@ -1627,6 +1777,10 @@ class Analysis:
         cache, rows = {}, []
         end = install + pd.DateOffset(years=life)
         cum = -(price or 0.0)
+        cum_fx = cum
+        fx_alt = self.cheapest_fixed()
+        if fx_alt is not None and dyn is not None and fx_alt.id == dyn.id:
+            fx_alt = None
         for year in range(install.year, end.year + 1):
             a = max(install, pd.Timestamp(year=year, month=1, day=1))
             z = min(end, pd.Timestamp(year=year + 1, month=1, day=1))
@@ -1646,12 +1800,24 @@ class Analysis:
             age = max(0.0, (pd.Timestamp(year=year, month=7, day=1) - install).days / 365.0)
             s = full * share * (1 - deg) ** age
             cum += s
+            # the alternative: the cheapest fixed offer instead of dynamic from 2027
+            if isinstance(key, tuple) or fx_alt is None:
+                s_fx = s
+            else:
+                k2 = ("fx", key)
+                if k2 not in cache:
+                    cache[k2] = saving_for(year, after=fx_alt)
+                s_fx = cache[k2][2] * share * (1 - deg) ** age
+            cum_fx += s_fx
             rows.append({"year": year, "contract": label, "rules": rules, "share_of_year": share,
                          "production_kwh": prod.sum() * share * (1 - deg) ** age,
                          "self_used_kwh": self_used.sum() * share * (1 - deg) ** age,
                          "exported_kwh": exp.sum() * share * (1 - deg) ** age,
-                         "saving_eur": s, "cumulative_eur": cum})
+                         "saving_eur": s, "cumulative_eur": cum,
+                         "saving_if_fixed_eur": s_fx, "cumulative_if_fixed_eur": cum_fx})
         df = pd.DataFrame(rows)
+        if fx_alt is None:
+            df = df.drop(columns=["saving_if_fixed_eur", "cumulative_if_fixed_eur"])
         sec.tables["solar_saving_per_year"] = df.round(2)
         payback_year = None
         if price:
@@ -1697,6 +1863,16 @@ class Analysis:
                     pb2 = prev_x + (dec(z) - prev_x) * (-prev) / (v - prev)
                     break
                 prev, prev_x = v, dec(z)
+        pb_fx = None
+        if "cumulative_if_fixed_eur" in df and price:
+            prev, prev_x = -price, install.year + (install.dayofyear - 1) / 365.0
+            for yr, v in zip(df.year, df.cumulative_if_fixed_eur):
+                zx = float(min(end, pd.Timestamp(year=yr + 1, month=1, day=1)).year) if yr < end.year else \
+                    end.year + (end.dayofyear - 1) / 365.0
+                if v >= 0 > prev:
+                    pb_fx = prev_x + (zx - prev_x) * (-prev) / (v - prev)
+                    break
+                prev, prev_x = v, zx
         fixed_rows = df[df.contract == (fixed.label if fixed else "")]
         dyn_rows = df[(df.contract != (fixed.label if fixed else "")) & (df.share_of_year > 0.99)]
         f_full = fixed_rows[fixed_rows.share_of_year > 0.99].saving_eur.mean() if len(fixed_rows) else np.nan
@@ -1722,6 +1898,14 @@ class Analysis:
         else:
             md.append("- **No price set:** enter what the panels cost (settings, or `solar.price_eur` in "
                       "config.yaml) to see the payback year; the cumulative line now starts at €0.")
+        if "saving_if_fixed_eur" in df:
+            d27 = df[(df.year >= 2027) & (df.share_of_year > 0.99)]
+            if len(d27):
+                md.append(f"- **If you take the fixed offer {fx_alt.label} from 2027 instead of {dyn.label}:** the panels save "
+                          f"€{d27.saving_if_fixed_eur.iloc[0]:,.0f} a year instead of €{d27.saving_eur.iloc[0]:,.0f}"
+                          + (f"; paid back in {pb_fx:.1f}" if price and pb_fx else "")
+                          + ". The panels save more on an expensive fixed price, but the total bill is still higher "
+                            "(section 4).")
         if bat is not None:
             extra = df[df.year >= 2027].battery_saving_eur
             md.append(f"- **With the {bname}** (bought {pd.Timestamp(self.cfg['analysis']['purchase_date']).date()} for "
@@ -1808,6 +1992,16 @@ class Analysis:
             if price and pb2:
                 spec.setdefault("points", []).append({"x": round(pb2, 3), "y": 0, "color": "#1baf7a",
                                                       "label": f"with battery {pb2:.1f}"})
+        if "cumulative_if_fixed_eur" in df:
+            fx_vals = [-(price or 0.0)] + list(df.cumulative_if_fixed_eur)
+            grid = spec["x"]
+            spec["series"].append({"label": f"Panels only, {fx_alt.label} from 2027", "short": "panels, fixed 2027+",
+                                   "color": "#4a3aa7",
+                                   "values": [round(float(np.interp(v, x, fx_vals)), 1) for v in grid]})
+            spec["endLabels"] = True
+            if price and pb_fx:
+                spec.setdefault("points", []).append({"x": round(pb_fx, 3), "y": 0, "color": "#4a3aa7",
+                                                      "label": f"fixed {pb_fx:.1f}"})
         sec.interactive["solar_cumulative"] = spec
         self.emit(sec)
 
@@ -1898,6 +2092,14 @@ class Analysis:
             best_c = combo.iloc[combo.yearly_cost_eur_2027.idxmin()]
             md.append(f"- **Cheapest combination from 2027:** {best_c.option}, about "
                       f"€{best_c.yearly_cost_eur_2027:,.0f} a year (today: €{combo.iloc[0].yearly_cost_eur_2027:,.0f}).")
+            fx = self.cheapest_fixed()
+            if fx is not None and fx is not self.current:
+                fr = combo[combo.option.str.startswith(fx.label) & (combo.battery_saving_eur > 0)]
+                if len(fr):
+                    md.append(f"- **If you prefer a fixed price:** {fr.iloc[0].option} costs about "
+                              f"€{fr.iloc[0].yearly_cost_eur_2027:,.0f} a year, €"
+                              f"{fr.iloc[0].yearly_cost_eur_2027 - best_c.yearly_cost_eur_2027:,.0f} more than the "
+                              "cheapest combination – the price of certainty.")
         if classes is not None and len(classes) > 1:
             md.append(self.size_class_text(classes))
         others = comp[comp._model != self.short_name(b)]

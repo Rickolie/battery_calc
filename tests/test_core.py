@@ -352,9 +352,13 @@ def test_full_run_both_regimes_and_analyses(tmp_path):
     for scn in ("2026 rules", "2027-2029 rules", "2030+ rules"):
         assert any(k.startswith("Last 3 years") and scn in k for k in keys)
         assert any(k.startswith("Full history") and scn in k for k in keys)
-    rk = secs["payback"].tables["payback_ranked"]
+    rk = secs["payback"].tables["payback_all_variants"]
     assert set(rk["analysis"]) == {"headline", "full"}
     assert (rk["payback_years"] > 0).all()
+    # the printed ranking shows every contract type with its yearly cost incl. the battery
+    compact = secs["payback"].tables["payback_ranked"]
+    assert {"fixed", "dynamic"} <= set(compact.contract_type)
+    assert compact.yearly_cost_with_battery_2027.notna().all()
     assert os.path.exists(tmp_path / "res" / "breakeven.csv")
     # every column shown in a report table has a plain-language description
     from battery_calc.columns import describe

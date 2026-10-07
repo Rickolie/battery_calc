@@ -121,6 +121,11 @@ def _savings(df):
 
 
 def _ranked(df):
+    if "yearly_cost_with_battery_2027" in df:          # compact table: one row per battery × contract
+        c = _best(df, "yearly_cost_with_battery_2027")
+        p = _best(df, "payback_years")
+        return (f"Lowest yearly cost: {c.battery} on {c.contract}, {_e(c.yearly_cost_with_battery_2027)} a year; "
+                f"fastest payback: {p.battery} on {p.contract} ({p.payback_years:.1f} years).")
     d = df[(df.analysis == "headline") & (df.price_variant == _ref(df)) & (df.strategy != "perfect_foresight")]
     r = _best(d if len(d) else df, "payback_years")
     where = " (bought in Germany)" if r.get("bought_in") == "DE" else ""
@@ -219,6 +224,24 @@ def _solar(df):
     return s + f"; {_e(df.cumulative_eur.iloc[-1])} at the end of their life."
 
 
+def _fixdyn(df):
+    fx = df[df.role == "cheapest fixed offer"]
+    dy = df[df.role == "cheapest dynamic"]
+    if fx.empty or dy.empty:
+        return None
+    f, d = fx.iloc[0], dy.iloc[0]
+    return (f"From 2027: fixed {f.contract} {_e(f.cost_2027_2029_eur)} vs dynamic {d.contract} "
+            f"{_e(d.cost_2027_2029_eur)} a year – fixed costs {_e(f.cost_2027_2029_eur - d.cost_2027_2029_eur)} more.")
+
+
+def _fixdyn_batt(df):
+    d = df.dropna(subset=["fixed_costs_more_eur"]) if "fixed_costs_more_eur" in df else df.iloc[0:0]
+    if d.empty:
+        return None
+    return ("With a battery, fixed still costs more per year: " + "; ".join(
+        f"{r.size_class} {_e(r.fixed_costs_more_eur)}" for r in d.itertuples()) + ".")
+
+
 def _kiln_month(df):
     return "Free firing days per month and kiln size (surplus solar only)."
 
@@ -253,6 +276,8 @@ RULES = [
     (r"best_per_size_class", _size_class),
     (r"contract_and_battery_combinations", _combos),
     (r"kiln_free_firing_days", _kiln),
+    (r"fixed_vs_dynamic_with_battery", _fixdyn_batt),
+    (r"^fixed_vs_dynamic$", _fixdyn),
     (r"solar_saving_per_year", _solar),
     (r"free_days_per_month", _kiln_month),
     (r"energieknl", _energieknl),
