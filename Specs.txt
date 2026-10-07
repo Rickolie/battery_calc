@@ -618,3 +618,11 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - **10. Kiln:** cost per firing on the dynamic and on the fixed price.
   - **11. Solar:** what the panels save from 2027 on the fixed offer instead, a third cumulative line and its payback year.
 - **German prices in the battery list (addendum 11.19):** the battery list (section 5) shows `price_used_eur` and `bought_in`, and computes € per kWh from the price every calculation uses. The solar section says when the battery is bought in Germany.
+
+### 11.20 New defaults (2026-10-07)
+
+- **German prices:** on (website checkbox checked, `battery_defaults.use_german_prices: true`; CLI `--no-german-prices` to switch off).
+- **Black Friday estimates:** off (`blackfriday.estimates: false`; CLI `--bf-estimates` to switch on).
+- **Battery set:** all batteries (website default and `battery_set: all`).
+- **Solar panels:** €7,000, 7 kWp, installed 2024-01-10 (website fields and `solar` in config.yaml). The whole of 2024 is counted on the fixed contract with saldering.
+- **Yield note:** the solar section reports the yield per kWp implied by the measured export instead of warning that the kWp looks too small.

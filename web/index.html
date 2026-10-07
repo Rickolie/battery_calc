@@ -124,7 +124,7 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
             German manufacturer shops without VAT (only delivered in Germany; check whether you can buy there).
             <b>Black Friday</b>: the real deal found during the Black Friday window, or <b>(est.)</b> an estimate
             with the discount set below. "All variants" shows them side by side.</p></div>
-        <div><label><input type="checkbox" id="usede"> Include German prices</label>
+        <div><label><input type="checkbox" id="usede" checked> Include German prices</label>
           <p class="help">On: for every battery the cheaper of today's Dutch price (incl. VAT) and the German
             manufacturer-shop price (0% VAT for home solar storage, plus €50 travel/shipping) is used in all
             calculations, rankings and charts ("Cheapest NL/DE"; the tables show where it is bought). Off: Dutch
@@ -147,7 +147,7 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
       <legend>Batteries</legend>
       <div class="grid">
         <div><label for="bset">Batteries to compare</label>
-          <select id="bset"><option value="shortlist">Shortlist (14, faster)</option><option value="all">All batteries</option></select>
+          <select id="bset"><option value="all" selected>All batteries</option><option value="shortlist">Shortlist (14, faster)</option></select>
           <p class="help">The <b>shortlist</b> holds 14 representative batteries, with at least two in each size class (5, 7.5, 10 and 15 kWh); about 13 minutes.
             <b>All batteries</b> compares every size and brand in the dataset (34 configurations) and can take
             30–45 minutes in the browser.</p></div>
@@ -167,7 +167,7 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
         The report then shows a "Black Friday quick decision" table with the deal, its discount and the payback.
         Until real deals are found, the estimate below is used.</p>
       <div class="grid">
-        <div><label><input type="checkbox" id="bfest" checked> Use the discount estimates</label>
+        <div><label><input type="checkbox" id="bfest"> Use the discount estimates</label>
           <p class="help">On: adds "Black Friday (est.)" rows with the discounts below, so you can see the effect of
             a deal before one is found. Off: only real deal prices the scraper found are shown; the discount
             fields are then ignored.</p></div>
@@ -206,16 +206,16 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
         field empty to use the value from config.yaml.</p>
       <div class="grid">
         <div><label for="pvprice">Price paid for the panels</label>
-          € <input id="pvprice" inputmode="decimal" placeholder="e.g. 5400">
+          € <input id="pvprice" inputmode="decimal" value="7000">
           <p class="help">Panels, inverter and installation, after any VAT refund. Without a price the section
             shows the savings but no payback year.</p></div>
         <div><label for="pvkwp">System size (kWp)</label>
-          <input id="pvkwp" inputmode="decimal" placeholder="e.g. 4.8">
+          <input id="pvkwp" inputmode="decimal" value="7">
           <p class="help">Total peak power of the panels (number of panels × Wp ÷ 1000). Production is modelled
             from it (about 900 kWh per kWp a year in the Netherlands). Empty: estimated from your export,
             assuming you use 30% of the production yourself.</p></div>
         <div><label for="pvdate">Installed on</label>
-          <input id="pvdate" type="date" value="2024-07-01">
+          <input id="pvdate" type="date" value="2024-01-10">
           <p class="help">First day the panels produced.</p></div>
       </div>
     </fieldset>

@@ -1929,9 +1929,10 @@ class Analysis:
             md.append("- **kWp unknown:** set the real system size for a better production estimate.")
         elif self.pv is None and kwp and prod.sum() > float(kwp) * float(sc.get("yield_kwh_per_kwp", 900)) * 1.05:
             raised = prod.sum() / (float(kwp) * float(sc.get("yield_kwh_per_kwp", 900))) - 1
-            md.append(f"- **Check the kWp:** production had to be raised {raised:.0%} above {kwp:g} kWp × "
-                      f"{float(sc.get('yield_kwh_per_kwp', 900)):g} kWh to cover your measured export; the system is "
-                      "probably larger or yields more per kWp.")
+            md.append(f"- **Yield:** to cover your measured export the panels must produce about "
+                      f"{prod.sum() / float(kwp):,.0f} kWh per kWp a year, {raised:.0%} above the "
+                      f"{float(sc.get('yield_kwh_per_kwp', 900)):g} kWh default – normal for a good south-facing roof "
+                      "(set `solar.yield_kwh_per_kwp` if you know it, or add inverter data for exact numbers).")
         md += ["#### Why saldering makes the panels worth more until 2027",
                "- With saldering every exported kWh is netted against an imported kWh at the full price incl. "
                "energy tax and VAT, so the whole production is worth the import price.",
