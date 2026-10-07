@@ -104,6 +104,7 @@ const SECTIONS = [
   ["sanity", "9. Battery over the year – check per size"],
   ["kiln", "10. Pottery kiln on free power"],
   ["solar", "11. Solar panels: yearly saving and payback"],
+  ["extension", "12. Extra panels + battery: what an extension earns"],
 ];
 
 function renderToc() {
@@ -124,6 +125,8 @@ function tocDone(sec) {
 }
 
 $("run").onclick = () => {
+  state.ran = true;
+  hide("precomp");
   $("run").disabled = true;
   state.csv = {}; state.sections = [];
   $("results").innerHTML = ""; $("downloads").innerHTML = "";
@@ -140,6 +143,7 @@ $("run").onclick = () => {
     blackfriday: { discount_nl: pct("bfnl"), discount_de: pct("bfde"), estimates: $("bfest").checked },
     kiln: { firing_hours: num("kh"), avg_duty: pct("kd") },
     solar: { price_eur: num("pvprice"), kwp: num("pvkwp"), install_date: $("pvdate").value || null },
+    extension: extensionSettings(),
   };
   worker.postMessage({ cmd: "run", settings });
 };
@@ -161,6 +165,44 @@ function onSection(sec) {
   const next = SECTIONS.find(([id]) => !document.getElementById(id) && id !== "advice");
   status(`Computed: ${sec.title}` + (next ? ` – now working on: ${next[1]}` : ""));
 }
+
+function extensionSettings() {
+  const val = (el) => { const v = parseFloat(el.value.replace(",", ".")); return isNaN(v) ? 0 : v; };
+  const options = [...document.querySelectorAll(".extable tbody tr")].map((tr) => ({
+    name: tr.querySelector(".exname").value.trim(), kwp: val(tr.querySelector(".exkwp")),
+    battery_kwh: val(tr.querySelector(".exkwh")), inverter_kw: val(tr.querySelector(".exinv")),
+    price_eur: val(tr.querySelector(".exprice")),
+  })).filter((o) => o.kwp > 0 || o.battery_kwh > 0);
+  return { enabled: $("exon").checked, options };
+}
+
+// The default report (Rick's data, default settings) is computed at every deploy and shown at
+// once; pressing "Run analysis" recomputes it in the browser with the chosen settings.
+async function loadPrecomputed() {
+  let data;
+  try {
+    const r = await fetch("precomputed/sections.json", { cache: "no-cache" });
+    if (!r.ok) return;
+    data = await r.json();
+  } catch (e) { return; }
+  if (state.ran) return;                       // the visitor already started their own run
+  show("step4");
+  renderToc();
+  $("results").innerHTML = "";
+  $("downloads").innerHTML = "";
+  for (const sec of data.sections) onSection(sec);
+  const m = data.meta || {};
+  $("precomp").textContent = `Showing the precomputed report for Rick's data with the default settings ` +
+    `(computed ${m.generated_at || "at deploy"}${m.commit ? ", version " + m.commit : ""}). ` +
+    "Change the settings above and press Run analysis to recalculate it in your browser.";
+  show("precomp");
+  for (const [name, href] of [["report.html", "precomputed/report.html"], ["report.md", "precomputed/report.md"]]) {
+    const a = document.createElement("a"); a.href = href; a.download = name; a.textContent = name;
+    $("downloads").appendChild(a);
+  }
+  status("Precomputed default report loaded.", "ok");
+}
+loadPrecomputed();
 
 function downloadLink(name, text, type) {
   const a = document.createElement("a");

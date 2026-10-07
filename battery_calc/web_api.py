@@ -67,6 +67,11 @@ def run(settings_json: str, on_section=None, config_path: str = "config.yaml") -
     if bf.get("estimates") is not None:
         cfg.setdefault("blackfriday", {})["estimates"] = bool(bf["estimates"])
     kiln = {k: float(v) for k, v in (s.get("kiln") or {}).items() if v not in (None, "")}
+    ext = s.get("extension")
+    if ext is not None:
+        cfg.setdefault("extension", {})["enabled"] = bool(ext.get("enabled", True))
+        if ext.get("options") is not None:
+            cfg["extension"]["options"] = ext["options"]
     for k, v in (s.get("solar") or {}).items():
         if v not in (None, ""):
             cfg.setdefault("solar", {})[k] = v if k == "install_date" else float(v)

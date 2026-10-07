@@ -117,6 +117,7 @@ class Analysis:
         self.step_sanity()
         self.step_kiln()
         self.step_solar()
+        self.step_extension()
         self.step_advice()
         return self.sections
 
@@ -1787,20 +1788,33 @@ class Analysis:
         self.emit(sec)
 
     # ------------------------------------------------------------------ 11. solar panels
+    def solar_production(self):
+        """(production per interval kWh, kWp, kWp estimated?, source text) for the profile year."""
+        if "solar_prod" in self.results:
+            return self.results["solar_prod"]
+        sc = dict(self.cfg.get("solar", {}) or {})
+        exp = self.profile["exp"].values
+        if self.pv is not None:
+            prod = np.maximum(self.pv.fillna(0).values, exp)
+            kwp = sc.get("kwp") or prod.sum() / float(sc.get("yield_kwh_per_kwp", 900))
+            out = (prod, float(kwp), False, "your PV production file")
+        else:
+            prod, kwp, est = extras.pv_estimate(self.profile.index, exp, sc.get("kwp"),
+                                                float(sc.get("yield_kwh_per_kwp", 900)),
+                                                float(sc.get("self_share_if_unknown", 0.3)),
+                                                float(sc.get("latitude", 52.1)), float(sc.get("longitude", 5.1)))
+            src = (f"estimated: {kwp:.1f} kWp " + ("(guessed from your export – set the real kWp)" if est
+                                                   else "(your setting)") + " with a clear-sky model")
+            out = (prod, kwp, est, src)
+        self.results["solar_prod"] = out
+        return out
+
     def step_solar(self):
         sec = Section("solar", "11. Solar panels: yearly saving and payback")
         sc = dict(self.cfg.get("solar", {}) or {})
         pr = self.profile
         imp, exp = pr["imp"].values, pr["exp"].values
-        if self.pv is not None:
-            prod = np.maximum(self.pv.fillna(0).values, exp)
-            kwp, est, src = sc.get("kwp"), False, "your PV production file"
-        else:
-            prod, kwp, est = extras.pv_estimate(pr.index, exp, sc.get("kwp"), float(sc.get("yield_kwh_per_kwp", 900)),
-                                                float(sc.get("self_share_if_unknown", 0.3)),
-                                                float(sc.get("latitude", 52.1)), float(sc.get("longitude", 5.1)))
-            src = (f"estimated: {kwp:.1f} kWp " + ("(guessed from your export – set the real kWp)" if est
-                                                   else "(your setting)") + " with a clear-sky model")
+        prod, kwp, est, src = self.solar_production()
         self_used = prod - exp                                  # solar used in the house (kWh per interval)
         month_share = pd.Series(prod, index=pr.index).groupby(pr.index.month).sum()
         month_share = month_share / month_share.sum()
@@ -2090,6 +2104,147 @@ class Analysis:
         ts = np.array([s0 + t for t, _ in r["_path"]])
         vs = np.array([v for _, v in r["_path"]])
         return b.name, float(r["price_eur"]), (lambda x: np.interp(x, ts, vs)), s0
+
+    # ------------------------------------------------------------------ 12. extension options
+    EXT_COLORS = ["#4a3aa7", "#eb6834", "#1baf7a"]
+
+    def step_extension(self):
+        sec = Section("extension", "12. Extra panels + battery: what an extension earns")
+        ec = dict(self.cfg.get("extension", {}) or {})
+        opts = [o for o in (ec.get("options") or []) if o and (float(o.get("kwp") or 0) > 0
+                                                               or float(o.get("battery_kwh") or 0) > 0)]
+        if not ec.get("enabled", True) or not opts:
+            sec.md = "Switched off (settings: *Extra panels + battery*)."
+            self.emit(sec)
+            return
+        c = self.cheapest_dynamic() or self.current
+        fx = self.cheapest_fixed()
+        if c is None:
+            sec.md = "No contract to calculate with."
+            self.emit(sec)
+            return
+        prod, kwp, _, src = self.solar_production()
+        bc = dict(ec.get("battery", {}) or {})
+        life = int(ec.get("lifetime_years", 15))
+        deg = float(ec.get("pv_degradation_pct_per_year", 0.5)) / 100.0
+        r_disc = float(self.cfg["analysis"].get("discount_rate", 0.03))
+        start = pd.Timestamp(self.cfg["analysis"]["purchase_date"])
+        rows, curves = [], []
+
+        def run_option(o, contract, scenarios, years):
+            extra_kwp, kwh = float(o.get("kwp") or 0), float(o.get("battery_kwh") or 0)
+            inv = float(o.get("inverter_kw") or 0) or max(kwh * 0.5, 1.0)
+            extra = prod * (extra_kwp / kwp) if kwp else np.zeros_like(prod)
+            b = None
+            if kwh > 0:
+                b = Battery(id="ext", brand="Extension", model=str(o.get("name", "battery")), nominal_kwh=kwh,
+                            usable_kwh=kwh * float(bc.get("dod", 0.9)), max_charge_w=inv * 1000,
+                            max_discharge_w=inv * 1000, rte=float(bc.get("rte", 0.9)),
+                            standby_w=float(bc.get("standby_w", 15)), cycle_life=float(bc.get("cycle_life", 6000)),
+                            eol_capacity=float(bc.get("eol_capacity", 0.7)), warranty_years=life)
+            strats = ["self_consumption"]
+            if contract.is_dynamic and b is not None:
+                strats += [s for s in ("forecast_curtail", "forecast") if s in self.strategies_for(contract)]
+            out, used = {}, {}
+            for scn in scenarios:
+                vals = {s: [] for s in strats}
+                for label, per, idx, _ in self.periods(contract, scn, years if contract.is_dynamic else None):
+                    ex = extra if label == "profile" else extra[self.results[("replay", label)][1]]
+                    base = compute_cost(per, contract, self.regimes[scn], self.taxes, self.conn.label,
+                                        include_fixed=False).total
+                    net = per.imp - per.exp - ex
+                    p2 = per.with_flows(np.maximum(net, 0), np.maximum(-net, 0))
+                    for s in strats:
+                        if b is None:
+                            f_imp, f_exp = p2.imp, p2.exp
+                        else:
+                            res = self.sim_strategy(s, b, inv * 1000, p2, idx, contract, scn,
+                                                    float(bc.get("wear_eur_kwh", 0.08)))
+                            f_imp, f_exp = res.imp, res.exp
+                        cost = compute_cost(p2.with_flows(f_imp, f_exp), contract, self.regimes[scn], self.taxes,
+                                            self.conn.label, include_fixed=False).total
+                        vals[s].append(base - cost)
+                mean = {s: float(np.mean(v)) for s, v in vals.items() if v}
+                best = max(mean, key=mean.get)
+                out[scn], used[scn] = mean[best], best
+            return out, used, float(extra.sum())
+
+        for i, o in enumerate(opts):
+            price = float(o.get("price_eur") or 0)
+            sav, used, extra_kwh = run_option(o, c, self.scenarios, self.head_years)
+            # money path from the purchase date: rules per calendar year, panel degradation
+            t, year, cum, npv, pay = 0.0, start.year, -price, -price, None
+            first = (pd.Timestamp(year=year + 1, month=1, day=1) - start).days / 365.0
+            xs, ys = [start.year + (start.dayofyear - 1) / 365.0], [round(-price, 1)]
+            while t < life - 1e-9:
+                frac = min(first if t == 0 else 1.0, life - t)
+                scn = regime_for_year(self.cfg, year)
+                g = sav.get(scn, sav.get("nosal_min50", 0.0)) * frac * (1 - deg) ** t
+                if pay is None and cum + g >= 0 > cum and g > 0:
+                    pay = t + frac * (-cum) / g
+                cum += g
+                npv += g / (1 + r_disc) ** (t + frac / 2)
+                t += frac
+                year += 1
+                xs.append(round(xs[0] + t, 3))
+                ys.append(round(cum, 1))
+            row = {"option": o.get("name") or f"option {i + 1}", "extra_kwp": float(o.get("kwp") or 0),
+                   "battery_kwh": float(o.get("battery_kwh") or 0), "inverter_kw": float(o.get("inverter_kw") or 0),
+                   "price_eur": price, "extra_production_kwh": extra_kwh, "strategy": used.get("nosal_min50", ""),
+                   "saving_2026_rules_eur": sav.get("saldering"), "saving_2027_eur": sav.get("nosal_min50"),
+                   "saving_2030_eur": sav.get("nosal_2030"),
+                   "payback_years": pay if pay is not None else np.inf, "npv_eur": npv,
+                   "net_after_lifetime_eur": cum}
+            if fx is not None and fx is not c:
+                fsav, _, _ = run_option(o, fx, ["nosal_min50"], None)
+                row["saving_2027_on_fixed_eur"] = fsav.get("nosal_min50")
+            rows.append(row)
+            curves.append((row["option"], xs, ys, self.EXT_COLORS[i % 3], pay))
+        df = pd.DataFrame(rows)
+        sec.tables["extension_options"] = df.round(2)
+        best = df.loc[df.payback_years.idxmin()]
+        sec.summary = (f"Fastest payback: {best.option} – €{best.price_eur:,.0f}, saves about "
+                       f"€{best.saving_2027_eur:,.0f} a year from 2027, paid back in "
+                       + (f"{best.payback_years:.1f} years." if np.isfinite(best.payback_years) else "never."))
+        md = ["`yearly saving = cost now − cost with the extension` (same contract and rules; the extension is "
+              "added to your current panels)",
+              "`extra production = current production × extra kWp ÷ current kWp` (same roof, same weather)",
+              f"Contract: **{c.label}** (2026 rules until the end of 2026, then 2027–2029, then 2030+); bought on "
+              f"{start.date()}; lifetime {life} years."]
+        for r in df.itertuples():
+            pb = f"{r.payback_years:.1f} years" if np.isfinite(r.payback_years) else "not within its lifetime"
+            fx_txt = (f"; on the fixed offer it would save €{r.saving_2027_on_fixed_eur:,.0f}"
+                      if hasattr(r, "saving_2027_on_fixed_eur") and pd.notna(r.saving_2027_on_fixed_eur) else "")
+            md.append(f"- **{r.option}** (€{r.price_eur:,.0f}): saves €{r.saving_2027_eur:,.0f} a year from 2027 "
+                      f"(`{r.strategy}`), pays back in **{pb}**, net present value €{r.npv_eur:,.0f}{fx_txt}.")
+        md += ["#### Assumptions",
+               f"- Extra panels produce like your current ones ({src}); {deg:.1%} less output a year.",
+               f"- Battery: usable = {float(bc.get('dod', 0.9)):.0%} of the stated kWh, round-trip efficiency "
+               f"{float(bc.get('rte', 0.9)):.0%} (hybrid / DC-coupled), standby {float(bc.get('standby_w', 15)):g} W, "
+               f"charge and discharge power = the inverter kW, wear €{float(bc.get('wear_eur_kwh', 0.08)):.2f} per kWh "
+               "in the strategy's decisions.",
+               "- Strategy: the best of self-consumption and the forecast optimiser (with zero-export curtailment) "
+               "on the dynamic contract; self-consumption on a fixed contract.",
+               "- More panels mainly add export in summer: from 2027 that earns the low midday price, so extra "
+               "panels pay back slower without a battery to store their output.",
+               "- The connection's export limit and the inverter's own clipping are not modelled; check them with "
+               "the installer (3×25 A allows about 17 kW)."]
+        sec.md = "\n".join(md)
+        sec.interactive["extension_cumulative"] = {
+            "kind": "lines", "unit": "€", "yLabel": "€ cumulative", "zero": True, "markers": False,
+            "title": "Extension options: when each one has earned itself back",
+            "subtitle": f"Starts at minus the price on {start.date()}, then adds each year's saving on {c.label}.",
+            "x": sorted({x for _, xs, _, _, _ in curves for x in xs}), "xFormat": "year", "endLabels": True,
+            "series": [], "points": []}
+        grid = sec.interactive["extension_cumulative"]["x"]
+        for name, xs, ys, color, pay in curves:
+            sec.interactive["extension_cumulative"]["series"].append(
+                {"label": name, "short": name, "color": color,
+                 "values": [round(float(np.interp(x, xs, ys)), 1) if x <= xs[-1] + 1e-9 else None for x in grid]})
+            if pay is not None:
+                sec.interactive["extension_cumulative"]["points"].append(
+                    {"x": round(xs[0] + pay, 3), "y": 0, "color": color, "label": f"{pay:.1f} yr"})
+        self.emit(sec)
 
     # ------------------------------------------------------------------ advice (shown first)
     def step_advice(self):
