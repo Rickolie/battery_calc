@@ -150,11 +150,45 @@
   }
 
   function svgChart(div, spec) {
+    div.textContent = "";
     frame(div, spec);
-    const W = Math.max(320, div.clientWidth - 20 || 800), H = spec.height || 320;
-    if (spec.kind === "bars") return barChart(div, spec, W, H);
-    if (spec.kind === "scatter") return scatterChart(div, spec, W, H);
-    if (spec.kind === "lines") return lineChart(div, spec, W, H);
+    const W = Math.max(280, (div.clientWidth || 820) - 20);
+    const narrow = W < 560;                       // phones: legend instead of end labels, smaller margins
+    const H = narrow ? Math.round((spec.height || 320) * 0.85) : (spec.height || 320);
+    const s = narrow ? Object.assign({}, spec, { endLabels: false, narrow: true }) : spec;
+    if (spec.kind === "bars") barChart(div, s, W, H);
+    else if (spec.kind === "scatter") scatterChart(div, s, W, H);
+    else if (spec.kind === "lines") lineChart(div, s, W, H);
+    if (spec.formulas) formulaPicker(div, spec.formulas);
+    // redraw when the width changes a lot (phone rotation, window resize)
+    if (window.ResizeObserver && !div._ro) {
+      let last = div.clientWidth;
+      div._ro = new ResizeObserver(() => {
+        if (Math.abs(div.clientWidth - last) > 40 && div.clientWidth > 0) { last = div.clientWidth; svgChart(div, spec); }
+      });
+      div._ro.observe(div);
+    }
+  }
+
+  // A dropdown under a chart showing the formula behind each line (to copy into a battery app or
+  // Home Assistant). Text only, set with textContent.
+  function formulaPicker(div, formulas) {
+    const box = document.createElement("div");
+    box.style.cssText = "margin:8px 0 4px;font-size:13px;color:" + INK;
+    const lab = document.createElement("label");
+    lab.textContent = "Formula for: ";
+    const sel = document.createElement("select");
+    sel.style.cssText = "max-width:100%;font-size:13px";
+    formulas.forEach((f, i) => { const o = document.createElement("option"); o.value = i; o.textContent = f.label; sel.appendChild(o); });
+    lab.appendChild(sel);
+    const out = document.createElement("div");
+    out.style.cssText = "margin-top:6px;padding:8px 10px;background:#f3f4f6;border-radius:6px;font-family:ui-monospace,monospace;" +
+      "font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere";
+    const show = () => { out.textContent = formulas[+sel.value].lines.join("\n"); };
+    sel.addEventListener("change", show);
+    box.append(lab, out);
+    div.appendChild(box);
+    show();
   }
 
   // Stacked (positive up, negative down) or grouped columns per category, with an
@@ -162,7 +196,7 @@
   function barChart(div, spec, W, H) {
     if (spec.series.length > 1) legend(div, spec.series.concat(spec.total ? [{ label: spec.total.label, color: INK }] : []), "box");
     const svg = el("svg", { width: W, height: H, role: "img" }, div);
-    const m = { l: 64, r: 12, t: 16, b: spec.rotate ? 70 : 34 };
+    const m = { l: spec.narrow ? 48 : 64, r: 8, t: 16, b: spec.rotate || spec.narrow ? 70 : 34 };
     const cats = spec.categories, n = cats.length, k = spec.series.length;
     let lo = 0, hi = 0;
     cats.forEach((_, i) => {
@@ -177,7 +211,7 @@
     const ys = niceTicks(lo, hi, 5);
     const y0 = ys[0], y1 = ys[ys.length - 1];
     const yScale = (v) => m.t + (H - m.t - m.b) * (1 - (v - y0) / (y1 - y0));
-    axes(svg, W, H, m, ys, yScale, spec.yLabel, spec.unit);
+    axes(svg, W, H, m, ys, yScale, spec.narrow ? null : spec.yLabel, spec.unit);
     const band = (W - m.l - m.r) / n;
     const tip = tooltip(div);
     cats.forEach((cat, i) => {
@@ -203,10 +237,11 @@
       if (spec.total) {
         const v = spec.total.values[i], y = yScale(v);
         el("circle", { cx, cy: y, r: 4.5, fill: INK, stroke: "#fff", "stroke-width": 2 }, svg);
-        txt(svg, cx + 9, y + 4, money(v, spec.unit), { fill: INK, "font-weight": 600 });
+        if (!spec.narrow || n <= 6) txt(svg, cx + 9, y + 4, money(v, spec.unit), { fill: INK, "font-weight": 600 });
       }
-      const lab = txt(svg, cx, H - m.b + 16, cat, { "text-anchor": spec.rotate ? "end" : "middle", fill: INK2 });
-      if (spec.rotate) lab.setAttribute("transform", `rotate(-35 ${cx} ${H - m.b + 16})`);
+      const rot = spec.rotate || spec.narrow;
+      const lab = txt(svg, cx, H - m.b + 16, cat, { "text-anchor": rot ? "end" : "middle", fill: INK2 });
+      if (rot) lab.setAttribute("transform", `rotate(-35 ${cx} ${H - m.b + 16})`);
       const hit = el("rect", { x: cx - band / 2, y: m.t, width: band, height: H - m.t - m.b, fill: "transparent" }, svg);
       const rows = spec.series.map((s) => [s.color, money(s.values[i], spec.unit), s.label]);
       if (spec.total) rows.unshift([INK, money(spec.total.values[i], spec.unit), spec.total.label]);
@@ -221,14 +256,14 @@
   function scatterChart(div, spec, W, H) {
     if (spec.legend) legend(div, spec.legend, "box");
     const svg = el("svg", { width: W, height: H, role: "img" }, div);
-    const m = { l: 56, r: 16, t: 14, b: 40 };
+    const m = { l: spec.narrow ? 44 : 56, r: 12, t: 14, b: 40 };
     const P = spec.points;
     const xs = niceTicks(0, Math.max(...P.map((p) => p.x)), 6);
     const yv = P.map((p) => p.y).filter((v) => isFinite(v));
     const ys = niceTicks(0, Math.max(...yv), 5);
     const xScale = (v) => m.l + (W - m.l - m.r) * (v - xs[0]) / (xs[xs.length - 1] - xs[0]);
     const yScale = (v) => m.t + (H - m.t - m.b) * (1 - (v - ys[0]) / (ys[ys.length - 1] - ys[0]));
-    axes(svg, W, H, m, ys, yScale, spec.yLabel, spec.yUnit);
+    axes(svg, W, H, m, ys, yScale, spec.narrow ? null : spec.yLabel, spec.yUnit);
     for (const v of xs) txt(svg, xScale(v), H - m.b + 16, String(v), { "text-anchor": "middle" });
     if (spec.xLabel) txt(svg, m.l + (W - m.l - m.r) / 2, H - 6, spec.xLabel, { "text-anchor": "middle" });
     const tip = tooltip(div);
@@ -237,7 +272,7 @@
       if (!isFinite(p.y)) continue;
       const x = xScale(p.x), y = yScale(p.y);
       el("circle", { cx: x, cy: y, r: p.strong ? 6 : 4.5, fill: p.color, stroke: "#fff", "stroke-width": 2 }, svg);
-      if (p.strong && p.short) {
+      if (p.strong && p.short && !spec.narrow) {
         const left = x > W * 0.65;     // keep labels inside the plot near the right edge
         txt(svg, left ? x - 9 : x + 9, y - 8, p.short, { fill: INK, "font-weight": 600, "text-anchor": left ? "end" : "start" });
       }
@@ -258,7 +293,7 @@
     if (spec.series.some((s) => s.context)) leg.push({ label: spec.contextLabel || "other options", color: MUTED });
     if (leg.length > 1) legend(div, leg, "line");
     const svg = el("svg", { width: W, height: H, role: "img" }, div);
-    const m = { l: 64, r: spec.endLabels ? 120 : 16, t: 14, b: 36 };
+    const m = { l: spec.narrow ? 48 : 64, r: spec.endLabels ? 120 : 12, t: 14, b: 36 };
     const X = spec.x;
     let lo = Infinity, hi = -Infinity;
     for (const s of spec.series) for (const v of s.values) if (v != null && isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
@@ -267,11 +302,12 @@
     const x0 = Math.min(...X), x1 = Math.max(...X);
     const xScale = (v) => m.l + (W - m.l - m.r) * (v - x0) / ((x1 - x0) || 1);
     const yScale = (v) => m.t + (H - m.t - m.b) * (1 - (v - ys[0]) / (ys[ys.length - 1] - ys[0]));
-    axes(svg, W, H, m, ys, yScale, spec.yLabel, spec.unit);
+    axes(svg, W, H, m, ys, yScale, spec.narrow ? null : spec.yLabel, spec.unit);
     const xt = spec.xTicks || X;
-    const every = Math.max(1, Math.ceil(xt.length / 12));
+    const every = Math.max(1, Math.ceil(xt.length / (spec.narrow ? 5 : 12)));
     xt.forEach((v, i) => { if (i % every === 0) txt(svg, xScale(v), H - m.b + 16, spec.xFormat === "year" ? String(Math.round(v)) : String(v), { "text-anchor": "middle" }); });
     if (spec.xLabel) txt(svg, m.l + (W - m.l - m.r) / 2, H - 4, spec.xLabel, { "text-anchor": "middle" });
+    if (spec.narrow) svg.querySelectorAll("text").forEach((e) => e.setAttribute("font-size", 10));
     const draw = (s, color, width) => {
       const pts = X.map((x, i) => [x, s.values[i]]).filter(([, v]) => v != null && isFinite(v));
       if (!pts.length) return;
@@ -280,13 +316,16 @@
       return pts;
     };
     for (const s of spec.series) if (s.context) draw(s, MUTED, 1);
+    const placed = [];
     for (const s of strong) {
       const pts = draw(s, s.color, 2);
       if (!pts) continue;
       if (spec.markers !== false) for (const [x, v] of pts) el("circle", { cx: xScale(x), cy: yScale(v), r: 3, fill: s.color }, svg);
       if (spec.endLabels) {
         const [x, v] = pts[pts.length - 1];
-        txt(svg, xScale(x) + 6, yScale(v) + 4, s.short || s.label, { fill: INK });
+        const y = yScale(v) + 4;
+        // skip a label that would overlap one already placed (the legend still names it)
+        if (!placed.some((py) => Math.abs(py - y) < 12)) { txt(svg, xScale(x) + 6, y, s.short || s.label, { fill: INK }); placed.push(y); }
       }
     }
     (spec.points || []).forEach((mk, i) => {

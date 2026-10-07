@@ -626,3 +626,17 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
 - **Battery set:** all batteries (website default and `battery_set: all`).
 - **Solar panels:** €7,000, 7 kWp, installed 2024-01-10 (website fields and `solar` in config.yaml). The whole of 2024 is counted on the fixed contract with saldering.
 - **Yield note:** the solar section reports the yield per kWp implied by the measured export instead of warning that the kWp looks too small.
+
+### 11.21 Contract chart with the fixed offer; mobile charts; break-even formulas (2026-10-07)
+
+- **Contract chart (section 4):** now interactive. It shows the 3 cheapest dynamic contracts per price year (2027–2029 rules, bonuses excluded) against the cheapest fixed *offer* as a flat line, with the current fixed contract as a grey context line. The old chart picked the cheapest fixed contract including the current one, so new fixed offers never appeared. The PNG used in the Markdown report follows the same choice.
+- **Mobile layout:** below 560 px wide the SVG charts:
+  - drop end labels (the legend names the lines) and the y-axis title;
+  - use smaller margins and fonts, fewer x ticks and rotated bar labels.
+  Charts redraw when the width changes (phone rotation). On wider screens, end labels that would overlap are skipped.
+- **Break-even formulas:** a "Formula for:" dropdown under the break-even chart gives, per line:
+  - `break-even = charge price × 1/RTE + wear` and `minimum difference = charge price × (1/RTE − 1) + wear`, in all-in prices;
+  - the same rule in spot (EPEX) prices for the cheapest dynamic contract: `discharge/sell only if spot ≥ charge spot × 1/RTE + (markup + energy tax) × (1/RTE − 1) + wear ÷ 1.21`;
+  - a worked example at a typical cheap hour, including the `min_delta` spot value;
+  - where RTE and wear come from.
+  The values can be entered directly as settings in a battery app or Home Assistant.
