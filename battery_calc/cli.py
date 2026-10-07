@@ -29,7 +29,10 @@ def build_parser(cfg_default_conn="3x25"):
     p.add_argument("--battery", default=None, help="chosen battery id for the earnings split and the kiln objective")
     p.add_argument("--kiln-hours", type=float, default=None, help="hours of a firing to maximum temperature")
     p.add_argument("--german-prices", action="store_true",
-                   help="use the cheaper of today's NL and DE (0%% VAT + travel) price in all calculations")
+                   help="use the cheaper of today's NL and DE (0%% VAT + travel) price in all calculations (default)")
+    p.add_argument("--no-german-prices", action="store_true", help="Dutch prices only")
+    p.add_argument("--bf-estimates", action="store_true",
+                   help="Black Friday: also show estimated-discount rows (off by default)")
     p.add_argument("--no-bf-estimates", action="store_true",
                    help="Black Friday: only real scraped deals, no estimated-discount rows")
     p.add_argument("--kiln-duty", type=float, default=None, help="average share of rated power drawn during a firing")
@@ -39,8 +42,10 @@ def build_parser(cfg_default_conn="3x25"):
 def main(argv=None):
     args = build_parser().parse_args(argv)
     cfg = load_config(args.config)
-    if args.german_prices:
-        cfg.setdefault("battery_defaults", {})["use_german_prices"] = True
+    if args.german_prices or args.no_german_prices:
+        cfg.setdefault("battery_defaults", {})["use_german_prices"] = not args.no_german_prices
+    if args.bf_estimates:
+        cfg.setdefault("blackfriday", {})["estimates"] = True
     if args.no_bf_estimates:
         cfg.setdefault("blackfriday", {})["estimates"] = False
     conn = args.connection or cfg.get("connection", {}).get("default", "3x25")
