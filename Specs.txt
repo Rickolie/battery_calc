@@ -640,3 +640,18 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - a worked example at a typical cheap hour, including the `min_delta` spot value;
   - where RTE and wear come from.
   The values can be entered directly as settings in a battery app or Home Assistant.
+
+### 11.22 Precomputed default report; extension options (2026-10-07)
+
+- **Precomputed default report:**
+  - The Pages workflow runs `tools/precompute.py` after building the site. It calls the same `web_api.run` the browser uses, with the website's default settings and Rick's data.
+  - It writes `precomputed/sections.json`, `report.html` and `report.md`.
+  - On load, the website shows those sections at once with a note (time and version). Pressing *Run analysis* recomputes in the browser with the chosen settings.
+  - The build job has a 150-minute timeout.
+- **New section 12 "Extra panels + battery: what an extension earns":**
+  - **Settings:** a checkbox and up to three options, each with name, extra kWp, battery kWh, inverter kW and price; also `extension` in config.yaml.
+  - **Extra production:** the modelled production of the current panels × extra kWp ÷ current kWp, subtracted from the house's net load.
+  - **Battery:** usable 90% of the stated kWh, RTE 90%, standby 15 W, power = inverter kW. It runs the best of self-consumption and the forecast optimiser with curtailment on the cheapest dynamic contract.
+  - **Saving per rules period:** cost now − cost with the extension, using the last 3 price years.
+  - **Money path:** from `analysis.purchase_date` over `lifetime_years` (15), with 0.5% a year panel degradation. Gives payback, NPV and the net result after the lifetime, plus the saving from 2027 on the cheapest fixed offer for comparison.
+  - **Output:** an `extension_options` table and an interactive cumulative chart with each option's payback point.

@@ -260,6 +260,21 @@ solar:
   latitude: 52.1
   longitude: 5.1
 
+# Section 12: extension options – extra solar panels and/or a battery with its own
+# (hybrid) inverter, bought on analysis.purchase_date. Extra production = the
+# modelled production of the current panels scaled to the extra kWp (same roof
+# orientation). The battery runs with the best strategy on the cheapest dynamic
+# contract; payback against the situation without the extension.
+extension:
+  enabled: true
+  lifetime_years: 15
+  pv_degradation_pct_per_year: 0.5
+  battery: {dod: 0.9, rte: 0.90, standby_w: 15, cycle_life: 6000, eol_capacity: 0.7, wear_eur_kwh: 0.08}
+  options:                       # example prices – change them to real quotes
+    - {name: "Extra panels 3 kWp", kwp: 3.0, battery_kwh: 0, inverter_kw: 0, price_eur: 2500}
+    - {name: "Hybrid battery 10 kWh", kwp: 0, battery_kwh: 10, inverter_kw: 5, price_eur: 5000}
+    - {name: "3 kWp + 10 kWh hybrid", kwp: 3.0, battery_kwh: 10, inverter_kw: 5, price_eur: 7500}
+
 # Objective 4: pottery kiln on free power (Specs.txt 11.6). Assumptions, edit
 # to the kiln's data sheet: a firing to maximum temperature (~1250-1300 C)
 # takes firing_hours, and the kiln draws avg_duty x rated power on average.

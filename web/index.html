@@ -44,6 +44,7 @@ details.sec>summary{cursor:pointer;padding:6px 0}details.sec>summary h2{display:
 .keyfind{margin:2px 0 0 18px;color:var(--muted);font-size:.9rem}
 details.tblw{margin:6px 0}details.tblw>summary{cursor:pointer;font-size:.9rem}
 .tname{font-family:ui-monospace,monospace;font-weight:600}.togglebar button{margin-right:6px}
+.extable input{width:100%;min-width:60px;box-sizing:border-box}.extable td{padding:2px}
 details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10px}details.more>summary{cursor:pointer;font-weight:600}
 </style>
 </head>
@@ -200,6 +201,31 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
     </fieldset>
 
     <fieldset>
+      <legend>Extra panels + battery (extension)</legend>
+      <div><label><input type="checkbox" id="exon" checked> Calculate extension options (section 12)</label>
+        <p class="help">How quickly extra solar panels, a battery with its own (hybrid) inverter, or both, earn back
+          their price on top of what you have now. Extra panels produce like your current ones; the battery uses the
+          best strategy on the cheapest dynamic contract. Leave a row's kWp and kWh at 0 to skip it. The prices
+          below are examples – put in real quotes. Adds about 3 minutes in the browser.</p></div>
+      <div class="tbl"><table class="extable">
+        <thead><tr><th>Name</th><th>Extra kWp</th><th>Battery kWh</th><th>Inverter kW</th><th>Price €</th></tr></thead>
+        <tbody>
+          <tr><td><input class="exname" value="Extra panels 3 kWp"></td><td><input class="exkwp" inputmode="decimal" value="3"></td>
+            <td><input class="exkwh" inputmode="decimal" value="0"></td><td><input class="exinv" inputmode="decimal" value="0"></td>
+            <td><input class="exprice" inputmode="decimal" value="2500"></td></tr>
+          <tr><td><input class="exname" value="Hybrid battery 10 kWh"></td><td><input class="exkwp" inputmode="decimal" value="0"></td>
+            <td><input class="exkwh" inputmode="decimal" value="10"></td><td><input class="exinv" inputmode="decimal" value="5"></td>
+            <td><input class="exprice" inputmode="decimal" value="5000"></td></tr>
+          <tr><td><input class="exname" value="3 kWp + 10 kWh hybrid"></td><td><input class="exkwp" inputmode="decimal" value="3"></td>
+            <td><input class="exkwh" inputmode="decimal" value="10"></td><td><input class="exinv" inputmode="decimal" value="5"></td>
+            <td><input class="exprice" inputmode="decimal" value="7500"></td></tr>
+        </tbody></table></div>
+      <p class="help"><b>Extra kWp</b>: panels × Wp ÷ 1000. <b>Battery kWh</b>: stated capacity (90% is used).
+        <b>Inverter kW</b>: the battery's charge/discharge power (0 = half the kWh). <b>Price</b>: everything
+        incl. installation.</p>
+    </fieldset>
+
+    <fieldset>
       <legend>Solar panels: what they earn</legend>
       <p class="help">Section 11 works out what the panels saved you each year since installation, with your
         actual contracts: the fixed contract until 1 January 2027, then the cheapest dynamic contract. Leave a
@@ -225,6 +251,7 @@ details.more{margin:6px 0 10px;border-left:3px solid var(--line);padding-left:10
 
   <div id="step4" class="hidden">
     <h2>Step 4 – results</h2>
+    <p id="precomp" class="hidden" style="background:var(--card);padding:8px 10px;border-radius:6px"></p>
     <p class="muted">Sections appear as soon as they are computed. The battery payback (step 7) takes most of the
       time; the advice and the pottery-kiln section follow after it. The list below shows the progress.</p>
     <ul id="toc"></ul>

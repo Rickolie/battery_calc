@@ -21,6 +21,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,6 +45,12 @@ jobs:
           fi
       # Rick's P1 data is published with the site. Add --no-ricks-data to keep it out (see Specs.txt open questions).
       - run: python tools/build_site.py --out _site --pyodide-dist pyodide
+      # The default report (Rick's data, default settings) is computed here, so the website shows it
+      # at once; visitors only wait for the browser when they change settings.
+      - name: Precompute the default report
+        run: python tools/precompute.py --out _site/precomputed
+        env:
+          MPLBACKEND: Agg
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

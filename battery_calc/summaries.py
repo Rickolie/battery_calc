@@ -242,6 +242,14 @@ def _fixdyn_batt(df):
         f"{r.size_class} {_e(r.fixed_costs_more_eur)}" for r in d.itertuples()) + ".")
 
 
+def _extension(df):
+    r = _best(df, "payback_years")
+    if r is None:
+        return "No option pays back within its lifetime."
+    return (f"Fastest payback: {r.option} (€{r.price_eur:,.0f}), saves {_e(r.saving_2027_eur)} a year from 2027, "
+            f"{r.payback_years:.1f} years.")
+
+
 def _kiln_month(df):
     return "Free firing days per month and kiln size (surplus solar only)."
 
@@ -276,6 +284,7 @@ RULES = [
     (r"best_per_size_class", _size_class),
     (r"contract_and_battery_combinations", _combos),
     (r"kiln_free_firing_days", _kiln),
+    (r"extension_options", _extension),
     (r"fixed_vs_dynamic_with_battery", _fixdyn_batt),
     (r"^fixed_vs_dynamic$", _fixdyn),
     (r"solar_saving_per_year", _solar),
