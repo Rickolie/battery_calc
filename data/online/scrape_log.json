@@ -1,0 +1,20 @@
+[
+ {
+  "scraper": "prices",
+  "ok": true,
+  "message": "6862 prices \u2192 /home/runner/work/battery_calc/battery_calc/data/online/dayahead_energyzero_2026.csv",
+  "at": "2026-10-12"
+ },
+ {
+  "scraper": "taxes",
+  "ok": false,
+  "message": "HTTP Error 404: Not Found",
+  "at": "2026-10-12"
+ },
+ {
+  "scraper": "batteries",
+  "ok": true,
+  "message": "44 prices updated; errors: aeg_bbl09_4_8: no price matching 'BBL09_4.8_kWh_plug-in' on https://www.123accu.nl/Thuisbatterij/AEG-thuisbatterij-p3857302.html; aeg_bbl09_9_6: no price matching 'BBL09_9.6_kWh' on https://www.123accu.nl/Thuisbatterij/AEG-thuisbatterij-p3857302.html; marstek_venus_a_6: no price matching '=venus a + 2x erweiterungsakkus' on https://marstek.de/products/marstek-venus-a; ecoflow_ac_pro_4: no price matching '2 \u00d7 stream ac pro' on https://de.ecoflow.com/products/stream-ac-pro-ac; marstek_venus_a_2: no price matching '=venus a' on https://marstek.de/products/marstek-venus-a; indevolt_pf2000_hyb_6 https://de.indevolt.com/products/powerflex-2000-balkonkraftwerk-mit-speicher: HTTP Error 404: Not Found; indevolt_pf2000_hyb_6: no price matching 'powerflex2000' on https://de.indevolt.com/products/powerflex-2000-balkonkraftwerk-mit-speicher",
+  "at": "2026-10-12"
+ }
+]
