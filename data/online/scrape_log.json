@@ -2,19 +2,19 @@
  {
   "scraper": "prices",
   "ok": true,
-  "message": "7367 prices \u2192 /home/runner/work/battery_calc/battery_calc/data/online/dayahead_energyzero_2026.csv",
-  "at": "2026-11-02"
+  "message": "7535 prices \u2192 /home/runner/work/battery_calc/battery_calc/data/online/dayahead_energyzero_2026.csv",
+  "at": "2026-11-09"
  },
  {
   "scraper": "taxes",
   "ok": false,
   "message": "HTTP Error 404: Not Found",
-  "at": "2026-11-02"
+  "at": "2026-11-09"
  },
  {
   "scraper": "batteries",
   "ok": true,
   "message": "33 prices updated; errors: marstek_v3_5: no price matching '=venus e 3.0' on https://marstek.de/products/venus-e-3; marstek_v3_5_plug: no price matching '=venus e 3.0' on https://marstek.de/products/venus-e-3; marstek_v3_10: no price matching '=2x venus e 3.0' on https://marstek.de/products/venus-e-3; marstek_v3_15: no price matching '=3x venus e 3.0' on https://marstek.de/products/venus-e-3; indevolt_sf3000_5: no price matching '5.4kwh&al_een' on https://thuisbatterij.nl/winkel/indevolt-solidflex-3000/; indevolt_sf3000_9: no price matching '9_kwh&al_een' on https://thuisbatterij.nl/winkel/indevolt-solidflex-3000/; aeg_bbl09_4_8: no price matching 'BBL09_4.8_kWh_plug-in' on https://www.123accu.nl/Thuisbatterij/AEG-thuisbatterij-p3857302.html; aeg_bbl09_9_6: no price matching 'BBL09_9.6_kWh' on https://www.123accu.nl/Thuisbatterij/AEG-thuisbatterij-p3857302.html; marstek_venus_a_6: no price matching '=venus a + 2x erweiterungsakkus' on https://marstek.de/products/marstek-venus-a; marstek_venus_a_4: no price matching '=venus a + erweiterungsakku' on https://marstek.de/products/marstek-venus-a; ecoflow_ac_pro_4: no price matching '2 \u00d7 stream ac pro' on https://de.ecoflow.com/products/stream-ac-pro-ac; zendure_2400acplus_5: no price matching '1*ab3000l&!smart meter' on https://zendure.de/products/zendure-solarflow-2400-ac-plus; marstek_venus_a_2: no price matching '=venus a' on https://marstek.de/products/marstek-venus-a; zendure_2400acplus_2: no price matching 'ohne batterie&!smart meter' on https://zendure.de/products/zendure-solarflow-2400-ac-plus; indevolt_pf2000_hyb_6 https://de.indevolt.com/products/powerflex-2000-balkonkraftwerk-mit-speicher: HTTP Error 404: Not Found; indevolt_pf2000_hyb_6: no price matching 'powerflex2000' on https://de.indevolt.com/products/powerflex-2000-balkonkraftwerk-mit-speicher; indevolt_sf2000_hyb_5: no price matching 'ajax:attribute_omvormer=Solidflex hybride;attribute_extra-capaciteit=1 SFA3600 batterij module 3.6 kWh;attribute_pa_type-p1-meter=ik-heb-al-een-p1-of-ct-meter-van-indevolt' on https://thuisbatterij.nl/winkel/indevolt-solidflex-2000/; indevolt_sf2000_hyb_9: no price matching 'ajax:attribute_omvormer=Solidflex hybride;attribute_extra-capaciteit=2 SFA3600 batterij modules 7.2 kWh;attribute_pa_type-p1-meter=ik-heb-al-een-p1-of-ct-meter-van-indevolt' on https://thuisbatterij.nl/winkel/indevolt-solidflex-2000/",
-  "at": "2026-11-02"
+  "at": "2026-11-09"
  }
 ]
