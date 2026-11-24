@@ -671,3 +671,13 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - Now: €0.15829/kWh delivery incl. VAT; €36.57/month feed-in costs for his export band; surplus paid €0.15/kWh.
   - From 2027 if he does not switch: €0.27236/kWh delivery incl. VAT; feed-in €0.1133/kWh; feed-in costs €0.03117/kWh.
   - Battery shortlist, 3×25 A connection.
+
+### 11.24 Room on the connection (2026-11-24)
+
+- **Section 2** gains a table `room_on_connection`: for each appliance in `connection_headroom.appliances` (airco, heat pump, heat pump + backup heater, 1-phase 16/32 A and 3-phase 16 A car chargers), whether it fits on the connection.
+- **Method:** every quarter-hour in the hours and months it runs, `house peak + appliance` is compared with amps × 230 V per phase.
+  - The house peak is the meter's per-phase maximum (`L1/L2/L3 max W`) when recorded, otherwise the 15-minute average import.
+  - A 1-phase appliance goes on the lightest phase; a 3-phase one adds a third per phase; a 3-phase appliance on a 1-phase connection is "needs a 3-phase connection".
+- **Verdicts:** fits; fits but close at peaks (load management advised); does not fit without load management.
+- **Phase columns:** negative values written as text with a leading apostrophe ("'-396") are read correctly, and empty phase columns (1-phase connection) are left out.
+- **Peter's connection:** 1×35 A, single phase (his meter reports only L1).

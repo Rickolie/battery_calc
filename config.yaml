@@ -50,6 +50,17 @@ connection:
   volts: 230
   options: [1x25, 1x35, 1x40, 3x25, 3x35, 3x40, 3x50, 3x63]
 
+# Room on the connection for an extra appliance (section 2). kW = electric power drawn;
+# hours = [from, to) when it runs at full power; months = when it is used.
+connection_headroom:
+  appliances:
+    - {name: "Airco (split unit, cooling)", kw: 1.2, phases: 1, hours: [12, 23], months: [5, 6, 7, 8, 9]}
+    - {name: "Heat pump (air-water)", kw: 3.0, phases: 1, hours: [0, 24], months: [1, 2, 3, 4, 10, 11, 12]}
+    - {name: "Heat pump + 3 kW backup heater", kw: 6.0, phases: 1, hours: [0, 24], months: [12, 1, 2]}
+    - {name: "Car charger 1-phase 16 A", kw: 3.7, phases: 1, hours: [17, 24]}
+    - {name: "Car charger 1-phase 32 A", kw: 7.4, phases: 1, hours: [17, 24]}
+    - {name: "Car charger 3-phase 16 A", kw: 11.0, phases: 3, hours: [17, 24]}
+
 tariff_hours:                    # used for synthetic intervals (T1/T2 rule)
   normal_start_hour: 7
   normal_end_hour: 21

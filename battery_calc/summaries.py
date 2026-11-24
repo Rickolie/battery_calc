@@ -250,6 +250,12 @@ def _extension(df):
             f"{r.payback_years:.1f} years.")
 
 
+def _room(df):
+    ok = [r.appliance for r in df.itertuples() if str(r.verdict).startswith("fits")]
+    no = [r.appliance for r in df.itertuples() if str(r.verdict).startswith(("does not", "needs"))]
+    return f"Fits: {', '.join(ok) or 'none'}; needs load management: {', '.join(no) or 'none'}."
+
+
 def _kiln_month(df):
     return "Free firing days per month and kiln size (surplus solar only)."
 
@@ -284,6 +290,7 @@ RULES = [
     (r"best_per_size_class", _size_class),
     (r"contract_and_battery_combinations", _combos),
     (r"kiln_free_firing_days", _kiln),
+    (r"room_on_connection", _room),
     (r"extension_options", _extension),
     (r"fixed_vs_dynamic_with_battery", _fixdyn_batt),
     (r"^fixed_vs_dynamic$", _fixdyn),

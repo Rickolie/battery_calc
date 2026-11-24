@@ -892,9 +892,11 @@ class Analysis:
         raw = None
         src = self.inp.p1 or self.path("p1_file")
         cols = self.cfg["p1"].get("phase_max_columns") or []
-        if cols and isinstance(src, str) and os.path.exists(src):
+        p1c = self.cfg["p1"]
+        want = set(cols) | {p1c.get("time_column", "time"), p1c["import_t1"], p1c["import_t2"]}
+        if isinstance(src, str) and os.path.exists(src):
             try:
-                raw = pd.read_csv(src, usecols=lambda c: c in cols)
+                raw = pd.read_csv(src, usecols=lambda c: c in want, dtype={c: str for c in cols})
             except Exception:
                 raw = None
         stats, cover, phases, imp_s, exp_s = extras.power_profile(self.profile, self.real_mask, raw, cols)
@@ -913,6 +915,33 @@ class Analysis:
               "per-phase maximum (W) per interval, when the P1 file has those columns.",
               f"- Connection {self.conn.label}: {self.conn.phase_kw:.2f} kW per phase; batteries are capped at "
               f"{self.conn.battery_phase_cap_w / 1000:.2f} kW per phase."]
+        apps = (self.cfg.get("connection_headroom", {}) or {}).get("appliances") or []
+        if raw is not None and apps:
+            try:
+                room, real = extras.connection_headroom(raw, p1c, cols, self.conn, apps)
+            except Exception as e:                      # never let this break the report
+                room, real = None, 0.0
+                self.log(f"connection headroom failed: {e}")
+            if room is not None and len(room):
+                sec.tables["room_on_connection"] = room.round(2)
+                fits = [r.appliance + ("" if r.verdict == "fits" else " (close at peaks)")
+                        for r in room.itertuples() if r.verdict.startswith("fits")]
+                nofit = [r.appliance for r in room.itertuples() if r.verdict.startswith("does not") or
+                         r.verdict.startswith("needs")]
+                md += [f"**Room on your {self.conn.label} connection** ({self.conn.phase_kw:.2f} kW per phase):",
+                       "`house peak + appliance ≤ amps × 230 V` per phase, every quarter-hour of the year",
+                       f"- Fits: {', '.join(fits) or 'none of the listed appliances'}.",
+                       f"- Does not fit without load management: {', '.join(nofit) or 'none'}.",
+                       "#### How the room is checked",
+                       f"- The house's peak per phase comes from the meter's per-phase maximum for "
+                       f"{real:.0%} of the quarter-hours; the rest uses the 15-minute average, which hides short "
+                       "spikes (kettle, oven) – treat those months with some margin.",
+                       "- A 1-phase appliance goes on the lightest phase; a 3-phase one adds a third of its power to "
+                       "each phase. Edit the list in config.yaml `connection_headroom`.",
+                       "- A smart car charger or heat pump with load management (it reads the P1 meter and throttles) "
+                       "makes the 'close' cases safe."]
+                sec.summary = (f"{self.conn.label} connection: fits {', '.join(fits) or 'none of the listed appliances'}"
+                               + (f"; {', '.join(nofit[:2])} need load management." if nofit else "."))
         sec.md = "\n".join(md)
         f = self.fig(charts.power_duration, imp_s, exp_s, [0.8, 2.4])
         if f:

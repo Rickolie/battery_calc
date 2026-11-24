@@ -50,6 +50,13 @@ GLOSSARY = {
     "saving_2030_eur": "Saving per year under the 2030+ rules, €.",
     "saving_2027_on_fixed_eur": "Saving per year from 2027 if you take the cheapest fixed offer instead, €.",
     "net_after_lifetime_eur": "Total savings over the lifetime minus the price (€).",
+    "appliance": "The extra appliance being checked.",
+    "kw": "Electric power it draws when running (kW).",
+    "when": "Hours and months it is assumed to run at full power.",
+    "house_peak_p99_kw": "The house's own peak on the phase it would use, exceeded only 1% of the time in those hours (kW).",
+    "worst_total_kw": "Highest house peak + appliance on that phase in the year (kW).",
+    "over_limit_pct": "Share of its quarter-hours where house + appliance would exceed the fuse (%).",
+    "verdict": "Whether it fits on the connection as is.",
     "full_year": "True for a complete ownership year; the partial purchase year and partial last year are False.",
     "charged_kwh": "Energy put into the battery in the profile year (kWh, AC side).",
     "delivered_kwh": "Energy delivered by the battery in the profile year (kWh, AC side).",
@@ -299,6 +306,7 @@ TABLE_OVERRIDES = [
         "mean_eur": "Average yearly saving over the price years shown (€).",
         "cycles_per_year": "Full battery cycles per year.",
         "gap_to_bound_eur": "How much less than perfect foresight it saves per year (€)."}),
+    (r"room_on_connection", {"phases": "1 = single-phase appliance, 3 = three-phase."}),
     (r"monthly_flows", {"index": "Month (YYYY-MM) of the profile year."}),
 ]
 
