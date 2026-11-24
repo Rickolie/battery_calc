@@ -53,6 +53,7 @@ def compute_cost(period: Period, contract: Contract, regime: dict, taxes: Taxes,
     imp, exp, low = period.imp, period.exp, period.is_low
     I, X = float(imp.sum()), float(exp.sum())
     sal = bool(regime.get("saldering"))
+    contract = contract.for_rules(sal)
     mf = float(regime.get("feed_in_min_frac", 0.0))
     fi_vat = (1 + vat) if regime.get("feed_in_incl_vat") else 1.0
     frac = period.days / 365.0
@@ -126,6 +127,7 @@ def marginal_values(period: Period, contract: Contract, regime: dict, taxes: Tax
     vat = taxes.vat
     eb = taxes.energy_tax(period.tax_year)
     sal = bool(regime.get("saldering"))
+    contract = contract.for_rules(sal)
     mf = float(regime.get("feed_in_min_frac", 0.0))
     fi_vat = (1 + vat) if regime.get("feed_in_incl_vat") else 1.0
     fic = contract.feed_in_cost_per_kwh(post2027=not sal) * (1 + vat)

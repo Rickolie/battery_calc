@@ -17,6 +17,16 @@ from .p1 import FLAG_SYNTH, build_profile_year, load_p1
 from .report import render_html, render_markdown, section_html, slug
 
 
+def _merge(base: dict, over: dict) -> dict:
+    """Deep-merge config overrides (e.g. a precomputed profile for another household)."""
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
 def _json(o):
     return json.dumps(o, default=lambda x: None if isinstance(x, float) and np.isnan(x) else str(x))
 
@@ -48,6 +58,7 @@ def run(settings_json: str, on_section=None, config_path: str = "config.yaml") -
     """Run the full analysis. `on_section` gets one JSON string per section."""
     s = json.loads(settings_json)
     cfg = load_config(config_path)
+    _merge(cfg, s.get("config_overrides") or {})
     cfg["paths"]["results_dir"] = s.get("results_dir", "results")
     inputs = Inputs(label=s.get("label", "Rick's data"))
     if not s.get("use_ricks", True):

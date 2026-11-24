@@ -251,6 +251,23 @@ def test_german_prices_pick_the_cheaper_country():
     assert BEST_PRICE not in b.price_variants(50.0)       # only with German prices on
 
 
+def test_contract_rates_change_in_2027():
+    """A variable contract whose supply price and feed-in change on 1 January 2027."""
+    from battery_calc.contracts import contract_from_form
+    c = contract_from_form({"price_single": 0.10, "price_t1": 0.10, "price_t2": 0.10, "fixed_eur_year": 90,
+                            "feed_in": 0.12, "post2027_feed_in": 0.11, "post2027_feed_in_cost_kwh": 0.03,
+                            "post2027": {"price_single": 0.20, "price_t1": 0.20, "price_t2": 0.20}})
+    assert c.for_rules(saldering=True).price_t2 == 0.10
+    later = c.for_rules(saldering=False)
+    assert later.price_t2 == 0.20 and later.fixed_eur_year == 90
+    taxes = Taxes(CFG)
+    n = 96 * 7
+    per = Period(np.full(n, 0.2), np.zeros(n), np.zeros(n, bool), None, 7.0, 2027)
+    reg = CFG["regimes"]["nosal_min50"]
+    cost = compute_cost(per, c, reg, taxes, "3x25", include_fixed=False)
+    assert cost.supply == pytest.approx(0.2 * n * 0.20 * 1.21)
+
+
 def test_curtail_only_cuts_negative_value_export():
     from battery_calc.battery import curtail
     b = make_battery()

@@ -1,0 +1,34 @@
+# Precomputed report for Peter (tools/precompute.py --profile peter/profile.yaml).
+# Source: "contract 1.jpg" (rates from 2027 if he does not switch) and "contract 2.jpg" (current
+# rates), Essent "Groene Stroom – Variabel – Flexibele looptijd", single tariff (enkeltarief).
+# The model works excl. VAT and excl. energy tax: kale = incl. VAT ÷ 1.21; the 10% "Korting
+# Thuisvoordeel" is applied to the variable and fixed delivery costs (assumption: Essent gives
+# it on delivery costs).
+label: Peter
+slug: peter
+p1_file: peter/P1e-2025-12-01-2026-11-24 1.csv
+contract:
+  supplier: Current contract
+  product: Essent variable (Peter)
+  type: fixed                      # stated tariffs, not day-ahead prices
+  duration_months: 12
+  # current rates (2026, saldering)
+  price_single: 0.11774            # 0.15829 incl. VAT ÷ 1.21 × 0.9
+  price_t1: 0.11774
+  price_t2: 0.11774
+  fixed_eur_year: 93.64            # € 0.34490/day incl. VAT ÷ 1.21 × 0.9
+  feed_in: 0.12397                 # surplus above use € 0.15/kWh (no VAT) – the model adds VAT under saldering
+  feed_in_cost_tiers: "0-inf:362.64"   # € 36.57/month incl. VAT for his band (3,251–3,500 kWh export)
+  # rates from 1 January 2027 if he does not switch
+  post2027_feed_in: 0.1133         # € 0.11330/kWh, no VAT
+  post2027_feed_in_cost_kwh: 0.02576   # € 0.03117/kWh incl. VAT
+  post2027_feed_in_cost_tiers: "0-inf:0"
+  post2027:
+    price_single: 0.20258          # 0.27236 incl. VAT ÷ 1.21 × 0.9
+    price_t1: 0.20258
+    price_t2: 0.20258
+    fixed_eur_year: 98.06          # € 0.36121/day incl. VAT ÷ 1.21 × 0.9
+config:
+  battery_set: shortlist          # 14 batteries, at least two per size class (keeps the deploy short)
+  connection: {default: 3x25}      # capacity tariff t/m 3x25A
+  solar: {install_date: null, price_eur: null, kwp: null}

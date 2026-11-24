@@ -1812,6 +1812,11 @@ class Analysis:
     def step_solar(self):
         sec = Section("solar", "11. Solar panels: yearly saving and payback")
         sc = dict(self.cfg.get("solar", {}) or {})
+        if not sc.get("install_date"):
+            sec.md = ("No installation date for the solar panels is set (`solar.install_date`), so their yearly "
+                      "saving and payback are not calculated.")
+            self.emit(sec)
+            return
         pr = self.profile
         imp, exp = pr["imp"].values, pr["exp"].values
         prod, kwp, est, src = self.solar_production()

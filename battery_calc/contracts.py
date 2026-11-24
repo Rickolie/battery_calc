@@ -35,6 +35,7 @@ class Contract:
     post2027_feed_in: float | None = None
     post2027_feed_in_cost_tiers: list | None = None
     post2027_feed_in_cost_kwh: float | None = None   # per-kWh feed-in cost from 2027, if it differs
+    post2027: dict | None = None             # any other fields that change from 2027 (e.g. supply price)
     source: str = ""
     retrieved_at: str = ""
     verified: bool = False
@@ -57,6 +58,14 @@ class Contract:
             return self.price_single
         vals = [v for v in (self.price_t1, self.price_t2) if v is not None]
         return sum(vals) / len(vals) if vals else 0.0
+
+    def for_rules(self, saldering: bool) -> "Contract":
+        """The contract as it applies under these rules: from 2027 (no saldering) with the
+        `post2027` overrides, e.g. a variable contract whose supply price changes on 1 January."""
+        if saldering or not self.post2027:
+            return self
+        from dataclasses import replace
+        return replace(self, **{k: v for k, v in self.post2027.items() if hasattr(self, k)})
 
     def feed_in_cost_per_kwh(self, post2027: bool = False) -> float:
         if post2027 and self.post2027_feed_in_cost_kwh is not None:
@@ -243,6 +252,13 @@ def contract_from_form(d: dict) -> Contract:
             setattr(c, k, v)
     c.duration_months = int(_f(d.get("duration_months"), 12))
     c.feed_in_cost_tiers = tiers_from_text(d.get("feed_in_cost_tiers", ""))
+    for k in ("post2027_feed_in", "post2027_feed_in_cost_kwh"):
+        if _f(d.get(k)) is not None:
+            setattr(c, k, _f(d.get(k)))
+    if d.get("post2027_feed_in_cost_tiers"):
+        c.post2027_feed_in_cost_tiers = tiers_from_text(d["post2027_feed_in_cost_tiers"])
+    if isinstance(d.get("post2027"), dict):
+        c.post2027 = {k: _f(v) if not isinstance(v, (list, dict)) else v for k, v in d["post2027"].items()}
     c.netting_method = "spot_kwh_net" if c.is_dynamic else "tariff_blocks"
     c.source = "web form"
     return c
