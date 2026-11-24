@@ -156,6 +156,8 @@ battery_defaults:
   # true = also consider German prices (0% VAT + travel): every calculation and
   # chart uses the cheaper of today's NL and DE price ("Cheapest NL/DE").
   use_german_prices: true
+  # Scraped prices below this per nominal kWh are rejected (accessories, deposits, parsing slips).
+  min_plausible_eur_per_kwh: 100
 
 strategies:
   enabled: [self_consumption, timed, dynamic, dynamic_sell, forecast, hbc_default, hbc_pv_first, perfect_foresight,

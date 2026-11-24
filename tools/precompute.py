@@ -2,6 +2,12 @@
 shows it immediately instead of running the analysis in the browser first.
 
     python tools/precompute.py --out _site/precomputed
+    python tools/precompute.py --profile peter/profile.yaml --out _site/peter
+
+A profile (YAML) runs the same analysis for another household: its P1 file, its
+current contract (same fields as the website's contract form, plus `post2027`
+overrides for rates that change on 1 January 2027) and config overrides. The
+output folder then also gets an index.html (the standalone report page).
 
 Writes sections.json (what the browser would have received, section by section),
 report.html and report.md. Runs the same code path as the website (web_api.run).
@@ -50,12 +56,23 @@ def commit() -> str:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="_site/precomputed")
+    ap.add_argument("--profile", default=None, help="YAML profile for another household")
     a = ap.parse_args()
     out = os.path.abspath(a.out)
     os.makedirs(out, exist_ok=True)
     os.chdir(ROOT)
     cfg = load_config("config.yaml")
+    profile = None
+    if a.profile:
+        import yaml
+        with open(a.profile, encoding="utf-8") as f:
+            profile = yaml.safe_load(f)
+        web_api._merge(cfg, profile.get("config") or {})
     settings = default_settings(cfg)
+    if profile:
+        settings.update({"use_ricks": False, "label": profile.get("label", "Uploaded data"),
+                         "p1_path": profile["p1_file"], "contract": profile.get("contract"),
+                         "config_overrides": profile.get("config") or {}})
     sections = []
     t0 = time.time()
 
@@ -73,6 +90,9 @@ def main():
         f.write(result["html"])
     with open(os.path.join(out, "report.md"), "w", encoding="utf-8") as f:
         f.write(result["markdown"])
+    if profile:                                  # a standalone page for this household
+        with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as f:
+            f.write(result["html"])
     size = os.path.getsize(os.path.join(out, "sections.json")) / 1e6
     print(f"precomputed {len(sections)} sections in {meta['seconds']} s ({size:.1f} MB) -> {out}")
 

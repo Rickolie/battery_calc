@@ -51,6 +51,15 @@ jobs:
         run: python tools/precompute.py --out _site/precomputed
         env:
           MPLBACKEND: Agg
+      # Other households get their own precomputed page (e.g. /peter/).
+      - name: Precompute other households
+        run: |
+          for prof in */profile.yaml; do
+            [ -f "$prof" ] || continue
+            python tools/precompute.py --profile "$prof" --out "_site/$(dirname "$prof")"
+          done
+        env:
+          MPLBACKEND: Agg
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

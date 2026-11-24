@@ -146,7 +146,8 @@ def shop_price(page: str, url: str, match: str) -> float | None:
         with urllib.request.urlopen(req, timeout=30) as r:
             v = json.loads(r.read() or b"null")
         return float(v["display_price"]) if isinstance(v, dict) and v.get("display_price") else None
-    if "thuisbatterij.nl" in url:
+    if "thuisbatterij.nl" in url or ("123accu.nl" not in url and "data-product_variations" in page):
+        # WooCommerce variations (thuisbatterij.nl, marstek.nl, ...)
         m = re.search(r'data-product_variations="([^"]*)"', page)
         if m:
             for v in json.loads(htmllib.unescape(m.group(1))) or []:
@@ -267,11 +268,33 @@ def scrape_battery_prices(cfg: dict, force_blackfriday: bool = False, today: dt.
                     break
                 total += p
                 first_url = first_url or url
-            if total:
+            if total and total < floor:
+                errors.append(f"{rid}: ignored implausible price €{total:.2f} on {first_url}")
+            elif total:
                 found.append((total, first_url))
         return found
 
+    # Plausibility floor: a "price" below this per nominal kWh is an accessory, a deposit or a
+    # parsing slip (e.g. €49.95 for a 5 kWh battery), never a battery price.
+    floor_kwh = float(cfg.get("battery_defaults", {}).get("min_plausible_eur_per_kwh", 100.0))
     for i, r in df.iterrows():
+        try:
+            floor = floor_kwh * float(r.get("nominal_kwh") or 0)
+        except ValueError:
+            floor = 0.0
+        # clear implausible values stored earlier, so "lowest ever" and deals do not keep them
+        for col in ("price_nl_incl_vat", "price_nl_lowest_incl_vat", "price_nl_ref_incl_vat",
+                    "price_blackfriday_nl_incl_vat", "price_de_excl_vat", "price_de_ref_excl_vat",
+                    "price_blackfriday_de_excl_vat"):
+            v = r.get(col, "")
+            if v and floor and float(v) < floor:
+                errors.append(f"{r['id']}: cleared implausible {col} {v}")
+                df.at[i, col] = ""
+                r[col] = ""
+                if col.startswith("price_blackfriday"):
+                    base = col.rsplit("_", 2)[0]
+                    df.at[i, f"{base}_date"] = df.at[i, f"{base}_source"] = ""
+                    r[f"{base}_date"] = r[f"{base}_source"] = ""
         nl = collect(r["shop_urls"], r["id"])
         if r["tweakers_url"]:
             try:

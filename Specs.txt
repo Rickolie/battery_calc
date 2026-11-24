@@ -655,3 +655,19 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - **Saving per rules period:** cost now − cost with the extension, using the last 3 price years.
   - **Money path:** from `analysis.purchase_date` over `lifetime_years` (15), with 0.5% a year panel degradation. Gives payback, NPV and the net result after the lifetime, plus the saving from 2027 on the cheapest fixed offer for comparison.
   - **Output:** an `extension_options` table and an interactive cumulative chart with each option's payback point.
+
+### 11.23 Black Friday 2026 Marstek deal, price floor, other households (2026-11-24)
+
+- **Marstek Black Friday deal:** the marstek.nl "Black Month Deal" page is a shop source for the Venus E 3.0 sets. Its WooCommerce variations are read like thuisbatterij.nl (variations are now read on any WooCommerce shop).
+  - Pick-up, without P1 meter: 5.12 kWh €999, 10.24 kWh €1,949, 15.36 kWh €2,899.
+  - The 5.12 kWh normal reference price is €1,199.
+- **Price plausibility floor:** scraped prices below `battery_defaults.min_plausible_eur_per_kwh` (€100) × nominal kWh are rejected, and stored values below it are cleared. 123accu.nl had produced €49.95 for the 5.12 kWh Marstek, which had become its NL, lowest-ever and Black Friday price.
+- **Contract rates that change on 1 January 2027:** a contract can carry `post2027` overrides (supply price, fixed costs, …). The cost engine and the marginal values use them whenever saldering no longer applies.
+- **Other households:** `<name>/profile.yaml` holds a P1 file, the current contract (website contract-form fields plus `post2027`) and config overrides.
+  - `tools/precompute.py --profile` writes a standalone report page; the Pages workflow builds one per profile (e.g. `/peter/`), and the main page links to it.
+  - `web_api.run` accepts `config_overrides`.
+  - The solar-payback section is skipped when `solar.install_date` is not set.
+- **Peter** (`peter/`): Essent Groene Stroom Variabel, single tariff, 10% Thuisvoordeel on delivery costs.
+  - Now: €0.15829/kWh delivery incl. VAT; €36.57/month feed-in costs for his export band; surplus paid €0.15/kWh.
+  - From 2027 if he does not switch: €0.27236/kWh delivery incl. VAT; feed-in €0.1133/kWh; feed-in costs €0.03117/kWh.
+  - Battery shortlist, 3×25 A connection.
