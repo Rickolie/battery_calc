@@ -30,5 +30,5 @@ contract:
     fixed_eur_year: 98.06          # € 0.36121/day incl. VAT ÷ 1.21 × 0.9
 config:
   battery_set: shortlist          # 14 batteries, at least two per size class (keeps the deploy short)
-  connection: {default: 3x25}      # capacity tariff t/m 3x25A
+  connection: {default: 1x35}      # single phase: the meter only reports L1 (capacity tariff band t/m 1x80A)
   solar: {install_date: null, price_eur: null, kwp: null}

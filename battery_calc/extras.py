@@ -43,6 +43,69 @@ def min_difference_rows(batteries, wear_by_id: dict, cheap_price: float, vat: fl
 POWER_STEPS_KW = (0.8, 1.2, 1.6, 2.4, 3.0, 3.6, 4.6)
 
 
+def clean_watts(s: pd.Series) -> pd.Series:
+    """Per-phase peak column to numbers: some exports write negative (export) values
+    as text with a leading apostrophe, e.g. "'-396"."""
+    return pd.to_numeric(s.astype(str).str.replace("'", "", regex=False).str.strip(), errors="coerce")
+
+
+def connection_headroom(raw: pd.DataFrame, cfg_p1: dict, phase_cols: list, conn, appliances: list) -> tuple:
+    """Room on the grid connection for an extra appliance. Per quarter-hour the house's
+    peak on each phase (the meter's per-phase maximum when present, else the 15-minute
+    average import) plus the appliance is compared with the fuse (amps × 230 V per phase).
+    A 1-phase appliance goes on the lightest phase; a 3-phase one adds a third per phase.
+    Returns (table, share of quarter-hours with a real per-phase peak)."""
+    t = pd.to_datetime(raw[cfg_p1.get("time_column", "time")], errors="coerce")
+    imp = pd.to_numeric(raw[cfg_p1["import_t1"]], errors="coerce") + pd.to_numeric(raw[cfg_p1["import_t2"]], errors="coerce")
+    avg_kw = (imp.diff() * 4).clip(lower=0)
+    cols = [c for c in phase_cols if c in raw.columns]
+    ph = raw[cols].apply(clean_watts).clip(lower=0) / 1000.0 if cols else pd.DataFrame(index=raw.index)
+    ph = ph.loc[:, ph.notna().any()] if len(ph.columns) else ph
+    n_ph = conn.phases
+    if ph.shape[1] == 0:                      # no per-phase data: spread the average over the phases
+        ph = pd.DataFrame({f"L{i + 1}": avg_kw / n_ph for i in range(n_ph)})
+        real = 0.0
+    else:
+        real = float(ph.notna().any(axis=1).mean())
+        fill = avg_kw / max(ph.shape[1], 1)
+        ph = ph.apply(lambda col: col.fillna(fill))
+    ph = ph.iloc[:, :n_ph]
+    cap = conn.phase_kw
+    ok = t.notna() & ph.notna().all(axis=1)
+    ph, t = ph[ok], t[ok]
+    rows = []
+    for a in appliances:
+        kw, aph = float(a["kw"]), int(a.get("phases", 1))
+        h0, h1 = (a.get("hours") or [0, 24])
+        months = a.get("months") or list(range(1, 13))
+        sel = t.dt.month.isin(months) & (t.dt.hour >= h0) & (t.dt.hour < h1)
+        house = ph[sel]
+        when = f"{h0:02d}–{h1 % 24:02d} h, months {','.join(map(str, months)) if len(months) < 12 else 'all'}"
+        if aph == 3 and n_ph == 1:
+            rows.append({"appliance": a["name"], "kw": kw, "phases": aph, "when": when, "house_peak_p99_kw": None,
+                         "worst_total_kw": None, "over_limit_pct": None,
+                         "verdict": "needs a 3-phase connection"})
+            continue
+        if aph == 3:
+            total = house + kw / 3.0
+            worst_phase = total.max(axis=1)
+        else:
+            best = house.quantile(0.99).idxmin()      # installer puts it on the lightest phase
+            worst_phase = house[best] + kw
+        over = float((worst_phase > cap).mean()) if len(worst_phase) else 0.0
+        worst = float(worst_phase.max()) if len(worst_phase) else float("nan")
+        p99 = float((worst_phase - (kw / 3.0 if aph == 3 else kw)).quantile(0.99)) if len(worst_phase) else float("nan")
+        if over == 0 and worst <= cap * 0.9:
+            verdict = "fits"
+        elif over <= 0.01:
+            verdict = "fits, close to the limit at peaks – a load-managed (smart) device is safer"
+        else:
+            verdict = "does not fit without load management (or a heavier connection)"
+        rows.append({"appliance": a["name"], "kw": kw, "phases": aph, "when": when, "house_peak_p99_kw": p99,
+                     "worst_total_kw": worst, "over_limit_pct": over * 100, "verdict": verdict})
+    return pd.DataFrame(rows), real
+
+
 def power_profile(profile: pd.DataFrame, real_mask: np.ndarray, raw_p1=None, phase_cols=None):
     """Import/export power from 15-min energy, the share of energy a battery
     with a given power can absorb or deliver, and per-phase peaks."""
@@ -65,9 +128,11 @@ def power_profile(profile: pd.DataFrame, real_mask: np.ndarray, raw_p1=None, pha
     if raw_p1 is not None and phase_cols:
         cols = [c for c in phase_cols if c in raw_p1.columns]
         if cols:
-            ph = raw_p1[cols].apply(pd.to_numeric, errors="coerce") / 1000.0
-            phases = pd.DataFrame({"phase": cols, "p50_kw": ph.median().values, "p99_kw": ph.quantile(0.99).values,
-                                   "max_kw": ph.max().values})
+            ph = raw_p1[cols].apply(clean_watts) / 1000.0
+            ph = ph.loc[:, ph.notna().any()]            # a 1-phase connection leaves L2/L3 empty
+            if ph.shape[1]:
+                phases = pd.DataFrame({"phase": list(ph.columns), "p50_kw": ph.median().values,
+                                       "p99_kw": ph.quantile(0.99).values, "max_kw": ph.max().values})
     return stats, cover, phases, np.sort(imp_kw)[::-1], np.sort(exp_kw)[::-1]
 
 
