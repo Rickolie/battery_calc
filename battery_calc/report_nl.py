@@ -1,10 +1,14 @@
-"""Simplified Dutch report page for another household (e.g. Peter).
+"""Simplified Dutch report page for a household (e.g. Peter, or Rick's own data).
 
 Built from a finished Analysis run: the same numbers as the full report, but only the
 sections a household needs, in Dutch, and per section one "Meer details" dropdown that
 holds every table and explanation. The battery runs on its standard control
 (self-consumption from its own app) on every contract; on the dynamic contract the page
 also shows smart control on hourly prices (the `forecast` strategy) as an extra option.
+
+Household-specific sentences (where the contract came from, why it gets dearer, notes on the
+batteries) come from the profile's `report.notes` (see peter/profile.yaml); everything else is
+computed from the analysis.
 """
 from __future__ import annotations
 
@@ -85,16 +89,17 @@ def section(num_: int | None, title: str, finding: str, body: str, details: str)
 # ------------------------------------------------------------------ the page
 def render(an, meta: dict) -> str:
     T = {s.id: s for s in an.sections}
+    N = meta.get("notes") or {}
     cur, fx, dy = an.current, an.cheapest_fixed(), an.cheapest_dynamic()
     roles = [(k, c) for k, c in (("current", cur), ("fixed", fx), ("dynamic", dy)) if c is not None]
-    role_name = {"current": "Huidig contract houden", "fixed": "Goedkoopste vaste aanbieding",
+    role_name = {"current": N.get("current_role", "Huidig contract houden"), "fixed": "Goedkoopste vaste aanbieding",
                  "dynamic": "Goedkoopste dynamische contract", "smart": "Dynamisch met slimme sturing"}
     comp, broles = battery_rows(an, roles)
     focus = an.focus
-    parts = [advies(an, broles, role_name, comp, focus),
-             verbruik(an, T), vermogen(an, T), huidig(an, T, cur),
-             contracten(an, T, roles, role_name), batterijen(an, T, focus),
-             terugverdientijd(an, broles, role_name, comp, focus), door_het_jaar(an, T)]
+    parts = [advies(an, broles, role_name, comp, focus, N),
+             verbruik(an, T), vermogen(an, T), huidig(an, T, cur, N),
+             contracten(an, T, roles, role_name), batterijen(an, T, focus, N),
+             terugverdientijd(an, broles, role_name, comp, focus, N), door_het_jaar(an, T)]
     head = (f"<h1 style='font-size:1.5rem'>Energiecontract & thuisbatterij – {esc(meta.get('label', ''))}</h1>"
             f"<p class='keyfind'>Berekend {esc(meta.get('run_at', ''))} · aansluiting {esc(an.conn.label)} "
             f"({num(an.conn.phase_kw * an.conn.phases, 2)} kW) · meterdata {esc(meta.get('period', ''))}</p>")
@@ -120,6 +125,9 @@ def battery_rows(an, roles):
         parts.append(an.payback_compact(sm).assign(_role="smart"))
         broles.append(("smart", dy))
     comp = pd.concat(parts, ignore_index=True)
+    keep = {f["b"].id for f in (an.focus or [])}        # one battery per size class
+    if keep:
+        comp = comp[comp._bid.isin(keep)]
     return comp.sort_values(["yearly_cost_with_battery_2027", "payback_years"]).reset_index(drop=True), broles
 
 
@@ -127,11 +135,11 @@ SMART_UITLEG = ("Slimme sturing (alleen op een dynamisch contract) = elke middag
                 "bekend zijn, een plan maken met een verwachting van zonnestroom en verbruik (gemiddelde van de "
                 "afgelopen 3 dagen): laden met zonnestroom en in goedkope uren van het net, ontladen of terugleveren "
                 "in dure uren (vooral de avondpiek). Dit vraagt extra software, bijvoorbeeld Home Assistant met "
-                "Home Battery Control; de Marstek-app doet dit niet standaard. Gerekend zonder de zonnepanelen uit "
+                "Home Battery Control; de app van de batterij doet dit meestal niet standaard. Gerekend zonder de zonnepanelen uit "
                 "te schakelen bij negatieve prijzen.")
 
 
-def advies(an, roles, role_name, comp, focus) -> str:
+def advies(an, roles, role_name, comp, focus, N) -> str:
     sizes = [(f["b"], f["cls"]) for f in focus]
     rows, cands = [], []
     for k, c in roles:
@@ -157,7 +165,8 @@ def advies(an, roles, role_name, comp, focus) -> str:
     items = []
     if keep is not None and now is not None:
         items.append(f"<b>Als u niets verandert</b> kost stroom u vanaf 2027 ongeveer <b>{eur(keep)} per jaar</b> "
-                     f"(nu, met salderen, {eur(now)}): de saldering stopt en het tarief stijgt.")
+                     f"(nu, met salderen, {eur(now)}): " + N.get("why_dearer_short", "de saldering stopt.") +
+                     "")
     if b is None:
         items.append(f"<b>Goedkoopst:</b> {esc(role_name[k].lower())} ({esc(contract_nl(c.label))}) zonder batterij, "
                      f"ongeveer {eur(v)} per jaar.")
@@ -172,7 +181,7 @@ def advies(an, roles, role_name, comp, focus) -> str:
                      f"{eur(cur_best.yearly_cost_with_battery_2027)} per jaar.")
     items.append("Alle bedragen: jaarkosten vanaf 2027 inclusief btw, netbeheer en vermindering energiebelasting, "
                  "zonder eenmalige welkomstbonus. De batterij werkt met de <b>standaardinstelling van de "
-                 "Marstek-app (zelfverbruik)</b>; op het dynamische contract staat ook <b>slimme sturing</b> als "
+                 "batterij-app (zelfverbruik)</b>; op het dynamische contract staat ook <b>slimme sturing</b> als "
                  "extra optie (zie hoofdstuk 6).")
     spec = {"kind": "bars", "unit": "€", "yLabel": "€ per jaar",
             "title": "Jaarkosten vanaf 2027 per contract, met en zonder batterij",
@@ -189,9 +198,7 @@ def advies(an, roles, role_name, comp, focus) -> str:
                                "values": vals})
     details = (table(rows, head) +
                "<h3>Aannames</h3>" + bullets([
-                   "Uw huidige contract (Essent variabel) is overgenomen van de foto's: nu € 0,26914/kWh, vanaf 2027 "
-                   "€ 0,38321/kWh (incl. energiebelasting), terugleververgoeding vanaf 2027 € 0,1133/kWh en "
-                   "terugleverkosten € 0,03117/kWh. De 10% Thuisvoordeel is toegepast op de leveringskosten.",
+                   *([N["contract_source"]] if N.get("contract_source") else []),
                    "Dynamische contracten zijn doorgerekend met de werkelijke uurprijzen van 2023–2025 op uw "
                    "verbruik; vaste contracten met hun vaste tarieven.",
                    "Standaardinstelling = de batterij laadt met zonnestroom die u anders teruglevert en ontlaadt "
@@ -206,7 +213,8 @@ def advies(an, roles, role_name, comp, focus) -> str:
 def verbruik(an, T) -> str:
     m = T["data"].tables["monthly_flows"]
     labels = [f"{MAANDEN[int(i[5:7]) - 1]} {i[2:4]}" for i in m.index.astype(str)]
-    imp, exp = float(m.import_kwh.sum()), float(m.export_kwh.sum())
+    yr = 12 / max(len(m), 1)              # meter data can cover more or less than a year
+    imp, exp = float(m.import_kwh.sum()) * yr, float(m.export_kwh.sum()) * yr
     spec = {"kind": "bars", "unit": "kWh", "yLabel": "kWh per maand", "title": "Afname en teruglevering per maand",
             "categories": labels,
             "series": [{"label": "Afname van het net", "color": "#2a78d6", "values": [round(v) for v in m.import_kwh]},
@@ -244,7 +252,7 @@ def vermogen(an, T) -> str:
                           for r in ph.itertuples()], ["Fase", "Mediaan (kW)", "99% onder (kW)", "Hoogste piek (kW)"])
     details += bullets([
         "Per kwartier wordt <i>de piek van uw huis + het apparaat</i> vergeleken met de zekering (ampère × 230 V). "
-        "Voor de piek wordt de meting per fase van de meter gebruikt; waar die ontbreekt (december en januari) het "
+        "Voor de piek wordt de meting per fase van de meter gebruikt; waar die ontbreekt het "
         "kwartiergemiddelde, dat korte pieken (waterkoker, oven) niet laat zien.",
         "Airco: mei–september 12–23 uur; warmtepomp: oktober–april; bijverwarming: december–februari; laadpaal: "
         "17–24 uur.",
@@ -256,15 +264,16 @@ def vermogen(an, T) -> str:
                    body, details)
 
 
-def huidig(an, T, cur) -> str:
+def huidig(an, T, cur, N) -> str:
     t = T["current"].tables["current_contract_cost"]
     names = ["2026 (met salderen)", "2027–2029 (zonder salderen)", "vanaf 2030"]
     rows = [[n, eur(r.total), num(r.import_kwh), num(r.export_kwh)] for n, r in zip(names, t.itertuples())]
-    body = (bullets([f"Uw contract: <b>{esc(contract_nl(cur.label))}</b> (variabel, enkeltarief).",
+    kind = f" ({esc(N['contract_kind'])})" if N.get("contract_kind") else ""
+    body = (bullets([f"Uw contract: <b>{esc(contract_nl(cur.label))}</b>{kind}.",
                      f"Nu kost stroom u ongeveer <b>{eur(t.total.iloc[0])}</b> per jaar; vanaf 2027 ongeveer "
                      f"<b>{eur(t.total.iloc[1])}</b> als u dit contract houdt.",
-                     "Waarom duurder: de saldering stopt (teruggeleverde stroom wordt niet meer weggestreept tegen "
-                     "afname) en de leveringsprijs stijgt van € 0,15829 naar € 0,27236 per kWh (incl. btw)."])
+                     N.get("why_dearer", "Waarom duurder: de saldering stopt (teruggeleverde stroom wordt niet meer "
+                                         "weggestreept tegen afname).")])
             + table(rows, ["Jaar", "Kosten per jaar", "Afname (kWh)", "Teruglevering (kWh)"]))
     cols = [("supply", "Levering"), ("energy_tax", "Energiebelasting"), ("feed_in_income", "Terugleververgoeding"),
             ("feed_in_costs", "Terugleverkosten"), ("fixed_supplier", "Vaste leveringskosten"), ("grid", "Netbeheer"),
@@ -272,7 +281,7 @@ def huidig(an, T, cur) -> str:
     rows2 = [[label] + [eur(getattr(r, k)) for r in t.itertuples()] for k, label in cols]
     details = (table(rows2, ["Post"] + names) +
                bullets(["Bedragen per jaar inclusief btw, op uw gemeten verbruik.",
-                        "Terugleververgoeding is wat u krijgt; terugleverkosten is wat Essent rekent voor teruglevering."]))
+                        "Terugleververgoeding is wat u krijgt; terugleverkosten is wat uw leverancier rekent voor teruglevering."]))
     return section(3, "Uw huidige contract", f"Nu {eur(t.total.iloc[0])} per jaar, vanaf 2027 {eur(t.total.iloc[1])} als u "
                    "niets verandert.", body, details)
 
@@ -320,14 +329,14 @@ def contracten(an, T, roles, role_name) -> str:
             ["Contract", "Soort", "Kosten per jaar", "Welkomstbonus"])
     details += bullets(["Dynamisch: u betaalt per uur (of kwartier) de beursprijs plus een opslag; zonnestroom levert "
                         "midden op de dag weinig op omdat de beursprijs dan laag is.",
-                        "Vaste aanbieding: Essent Groene Stroom 1 jaar (vast), zoals door Rick opgevraagd.",
+                        *([f"Vaste aanbieding: {esc(contract_nl(fx.label))}."] if (fx := an.cheapest_fixed()) else []),
                         "Kosten inclusief btw, netbeheer en vermindering energiebelasting, zonder welkomstbonus."])
     return section(4, "Contracten zonder batterij", (f"Dynamisch ({contract_nl(dyn.label)}) is vanaf 2027 ongeveer "
                    f"{eur(d - an.cost27(dyn))} per jaar goedkoper dan uw huidige contract.")
                    if dyn is not None and d is not None else "Contractvergelijking.", body, details)
 
 
-def batterijen(an, T, focus) -> str:
+def batterijen(an, T, focus, N) -> str:
     rows = []
     for f in focus:
         b = f["b"]
@@ -337,18 +346,22 @@ def batterijen(an, T, focus) -> str:
                      eur(p), eur(p / b.usable_kwh if p else None), "Nederland" if src != "DE" else "Duitsland"])
     body = (table(rows, ["Batterij", "Capaciteit (kWh)", "Bruikbaar (kWh)", "Vermogen (kW)", "Prijs", "Per bruikbare kWh",
                          "Gekocht in"]) +
-            bullets(["De Marstek Venus E 3.0 is een stekkerbatterij van 5,12 kWh; 10,24 en 15,36 kWh zijn sets van 2 en 3 stuks.",
-                     "Prijzen van vandaag, inclusief Black Friday-aanbiedingen (afhalen, zonder P1-meter)."]))
-    details = bullets(["Bruikbare capaciteit: 90% van de opgegeven capaciteit.",
-                       "Rendement (laden + ontladen) 85% en sluimerverbruik 10 W: aannames, de fabrikant noemt ze niet.",
-                       "Levensduur: 10 jaar of 6.000 laadcycli; de capaciteit loopt in die tijd terug naar 70%.",
-                       "Op een 1-fase aansluiting werkt de batterij op één fase; het laad- en ontlaadvermogen (2,5 kW per "
-                       "stuk) past ruim binnen uw 35 A."])
-    return section(5, "Batterijen (Marstek Venus E 3.0)", f"{len(rows)} uitvoeringen, vanaf {rows[0][4]}." if rows else "",
-                   body, details)
+            bullets(N.get("battery_bullets") or
+                    [f"Per grootteklasse ({', '.join(lab for lab, *_ in an.size_classes())}) de "
+                     "batterij met de snelste terugverdientijd uit de vergelijking.",
+                     "Prijzen van vandaag, inclusief Black Friday-aanbiedingen waar bekend."]))
+    life = [f"{esc(f['b'].name)}: rendement {num(f['b'].rte * 100)}%, sluimerverbruik {num(f['b'].standby_w)} W, "
+            f"levensduur {num(f['b'].warranty_years)} jaar of {num(f['b'].cycle_life)} cycli, daarna "
+            f"{num(f['b'].eol_capacity * 100)}% capaciteit" for f in focus]
+    details = bullets(life + (N.get("battery_details") or
+                              ["De capaciteit loopt over de levensduur terug; rendement en sluimerverbruik zijn "
+                               "aannames waar de fabrikant ze niet noemt."]))
+    prices = [p for p in (an.battery_price(f["b"]) for f in focus) if p]
+    return section(5, N.get("battery_title", "Batterijen"),
+                   f"{len(rows)} uitvoeringen, vanaf {eur(min(prices))}." if prices else "", body, details)
 
 
-def terugverdientijd(an, roles, role_name, comp, focus) -> str:
+def terugverdientijd(an, roles, role_name, comp, focus, N) -> str:
     sizes = [f["b"] for f in focus]
     rows, pay_series, cost_rows = [], [], []
     for k, c in roles:
@@ -375,14 +388,13 @@ def terugverdientijd(an, roles, role_name, comp, focus) -> str:
     if cur is not None and dyn is not None:
         a = comp[comp._role == "current"].sort_values("payback_years").iloc[0]
         bdy = comp[comp._role == "dynamic"].sort_values("yearly_cost_with_battery_2027").iloc[0]
-        txt = [f"<b>Huidig contract houden:</b> de {esc(a.battery)} bespaart {eur(a.saving_eur_year_2027)} per jaar en "
+        txt = [f"<b>{esc(role_name['current'])}:</b> de {esc(a.battery)} bespaart {eur(a.saving_eur_year_2027)} per jaar en "
                f"is terugverdiend in <b>{num(a.payback_years, 1)} jaar</b>.",
                f"<b>Dynamisch contract:</b> de batterij bespaart daar minder (teruggeleverde stroom is midden op de dag "
                f"weinig waard, maar uw afname ook goedkoper), maar uw totale kosten zijn lager: met de "
                f"{esc(bdy.battery)} ongeveer <b>{eur(bdy.yearly_cost_with_battery_2027)} per jaar</b>.",
-               *smart_bullet(comp, role_name),
-               "Op uw huidige contract is elke opgeslagen kWh veel waard: zonder batterij krijgt u er € 0,11 voor "
-               "terug, met batterij bespaart u € 0,38 aan afname."]
+               *smart_bullet(comp, role_name, N),
+               *([N["stored_kwh"]] if N.get("stored_kwh") else [])]
     body = bullets(txt) + chart(spec)
     details = (table(rows, ["Contract", "Batterij", "Besparing per jaar", "Terugverdientijd", "Jaarkosten met batterij",
                             "Netto contante waarde"]) +
@@ -403,7 +415,8 @@ def terugverdientijd(an, roles, role_name, comp, focus) -> str:
                    f"({eur(best.yearly_cost_with_battery_2027)} per jaar).", body, details)
 
 
-def smart_bullet(comp, role_name) -> list[str]:
+def smart_bullet(comp, role_name, N=None) -> list[str]:
+    N = N or {}
     """One line: what smart control adds on the dynamic contract, per battery size."""
     std, sm = comp[comp._role == "dynamic"], comp[comp._role == "smart"]
     parts = []
@@ -411,7 +424,7 @@ def smart_bullet(comp, role_name) -> list[str]:
         x = std[std._bid == r["_bid"]]
         if len(x):
             x = x.iloc[0]
-            parts.append(f"{esc(r.battery.replace('Marstek Venus E 3.0 ', ''))}: {eur(r.saving_eur_year_2027)} in plaats "
+            parts.append(f"{esc(r.battery.replace(N.get('battery_prefix', '@@'), ''))}: {eur(r.saving_eur_year_2027)} in plaats "
                          f"van {eur(x.saving_eur_year_2027)} per jaar, terugverdiend in {num(r.payback_years, 1)} "
                          f"in plaats van {num(x.payback_years, 1)} jaar")
     if not parts:

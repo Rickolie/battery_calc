@@ -37,4 +37,27 @@ config:
   skip_steps: [kiln, solar, extension]
   connection: {default: 1x35}      # single phase: the meter only reports L1 (capacity tariff band t/m 1x80A)
   solar: {install_date: null, price_eur: null, kwp: null}
-report: {language: nl, simple: true}
+report:
+  language: nl
+  simple: true
+  notes:                           # household-specific sentences on the Dutch page (battery_calc/report_nl.py)
+    contract_kind: variabel, enkeltarief
+    why_dearer_short: de saldering stopt en het tarief stijgt.
+    why_dearer: >-
+      Waarom duurder: de saldering stopt (teruggeleverde stroom wordt niet meer weggestreept tegen afname)
+      en de leveringsprijs stijgt van € 0,15829 naar € 0,27236 per kWh (incl. btw).
+    contract_source: >-
+      Uw huidige contract (Essent variabel) is overgenomen van de foto's: nu € 0,26914/kWh, vanaf 2027
+      € 0,38321/kWh (incl. energiebelasting), terugleververgoeding vanaf 2027 € 0,1133/kWh en
+      terugleverkosten € 0,03117/kWh. De 10% Thuisvoordeel is toegepast op de leveringskosten.
+    stored_kwh: >-
+      Op uw huidige contract is elke opgeslagen kWh veel waard: zonder batterij krijgt u er € 0,11 voor
+      terug, met batterij bespaart u € 0,38 aan afname.
+    battery_title: Batterijen (Marstek Venus E 3.0)
+    battery_prefix: "Marstek Venus E 3.0 "
+    battery_bullets:
+      - De Marstek Venus E 3.0 is een stekkerbatterij van 5,12 kWh; 10,24 en 15,36 kWh zijn sets van 2 en 3 stuks.
+      - Prijzen van vandaag, inclusief Black Friday-aanbiedingen (afhalen, zonder P1-meter).
+    battery_details:
+      - Bruikbare capaciteit 90% van de opgegeven capaciteit; rendement en sluimerverbruik zijn aannames, de fabrikant noemt ze niet.
+      - Op een 1-fase aansluiting werkt de batterij op één fase; het laad- en ontlaadvermogen (2,5 kW per stuk) past ruim binnen uw 35 A.

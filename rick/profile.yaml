@@ -1,0 +1,22 @@
+# Simplified Dutch page for Rick (tools/precompute.py --profile rick/profile.yaml): Rick's own
+# P1 data and current contract (the same as the full report), standard battery control on every
+# contract plus smart control on hourly prices (forecast) as an extra option on dynamic.
+label: Rick
+use_ricks: true                    # Rick's data and contract from config.yaml (data/vast.txt)
+config:
+  strategies: {enabled: [self_consumption, forecast]}   # forecast = smart control, dynamic contracts only
+  skip_steps: [kiln, solar, extension]
+report:
+  language: nl
+  simple: true
+  notes:                           # household-specific sentences on the Dutch page (battery_calc/report_nl.py)
+    contract_kind: vast, enkeltarief, loopt tot januari 2027
+    current_role: Huidige tarieven houden
+    why_dearer: >-
+      Waarom duurder: de saldering stopt. Teruggeleverde stroom wordt niet meer weggestreept tegen afname: u
+      krijgt er € 0,06 per kWh voor (incl. btw) en betaalt voor afname € 0,16 per kWh plus energiebelasting.
+      Het vaste contract loopt in januari 2027 af; "huidige tarieven houden" laat zien wat een verlenging met
+      dezelfde tarieven zou kosten.
+    contract_source: >-
+      Uw huidige contract komt uit data/vast.txt (de tarieven van uw vaste contract); na januari 2027 is
+      gerekend met dezelfde tarieven.

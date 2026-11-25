@@ -706,3 +706,13 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
     forecast), without curtailment (that needs a controllable inverter and adds ~€3/yr).
   - Shown in the advice table/chart, the payback chart/table, and a bullet comparing smart
     vs standard per size; the assumptions explain it needs extra software (Home Assistant).
+
+11.27 Simplified Dutch page for Rick (/rick/)
+  - rick/profile.yaml with `use_ricks: true`: Rick's own P1 data and current contract, all
+    batteries (class winners per size class), standard control plus smart control on dynamic;
+    kiln, solar and extension skipped. Built by the same profile loop in the Pages workflow.
+  - report_nl is household-neutral: Peter's own sentences moved to `report.notes` in
+    peter/profile.yaml (contract_kind, why_dearer(_short), contract_source, stored_kwh,
+    battery_title/prefix/bullets/details, current_role). Usage per year is normalised when the
+    meter data covers more or less than 12 months.
+  - The main page links to both simplified pages.

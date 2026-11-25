@@ -433,10 +433,13 @@ def test_simple_dutch_page(tmp_path):
     an.no_write = True
     an.run()
     assert set(an.records.strategy) == {"self_consumption"}
-    page = report_nl.render(an, {"label": "Test", "run_at": "", "period": ""})
+    notes = {"contract_kind": "testsoort", "battery_title": "Testbatterijen"}
+    page = report_nl.render(an, {"label": "Test", "run_at": "", "period": "", "notes": notes})
     assert page.count("<section>") == 8                      # advice + 7 numbered sections
     assert page.count("<summary>Meer details</summary>") == 8
     assert "Huidig contract houden" in page and "Advies" in page
+    assert "(testsoort)" in page and "Testbatterijen" in page   # household notes from the profile
+    assert "foto's" not in page                                 # nothing of Peter's own text by default
 
 
 def test_hbc_extreme_pair_matching():

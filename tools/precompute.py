@@ -6,7 +6,8 @@ shows it immediately instead of running the analysis in the browser first.
 
 A profile (YAML) runs the same analysis for another household: its P1 file, its
 current contract (same fields as the website's contract form, plus `post2027`
-overrides for rates that change on 1 January 2027) and config overrides. The
+overrides for rates that change on 1 January 2027) and config overrides; `use_ricks: true`
+keeps Rick's own data and contract (for a simplified page of the default report). The
 output folder then also gets an index.html (the standalone report page).
 
 Writes sections.json (what the browser would have received, section by section),
@@ -69,7 +70,9 @@ def main():
             profile = yaml.safe_load(f)
         web_api._merge(cfg, profile.get("config") or {})
     settings = default_settings(cfg)
-    if profile:
+    if profile and profile.get("use_ricks"):     # Rick's own data and contract, other settings
+        settings.update({"label": profile.get("label", "Rick's data"), "config_overrides": profile.get("config") or {}})
+    elif profile:
         settings.update({"use_ricks": False, "label": profile.get("label", "Uploaded data"),
                          "p1_path": profile["p1_file"], "contract": profile.get("contract"),
                          "config_overrides": profile.get("config") or {}})
@@ -110,7 +113,8 @@ def simple_page(profile: dict, settings: dict, out: str):
     an.run()
     rep = an.p1rep
     meta = {"label": profile.get("label", ""), "run_at": time.strftime("%d-%m-%Y %H:%M"),
-            "period": f"{rep.first:%d-%m-%Y} – {rep.last:%d-%m-%Y}"}
+            "period": f"{rep.first:%d-%m-%Y} – {rep.last:%d-%m-%Y}",
+            "notes": (profile.get("report") or {}).get("notes") or {}}
     page = report_nl.render(an, meta)
     for name in ("index.html", "report.html"):
         with open(os.path.join(out, name), "w", encoding="utf-8") as f:
