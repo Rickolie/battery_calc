@@ -56,7 +56,27 @@ def validate_p1(path: str, config_path: str = "config.yaml") -> str:
 
 def run(settings_json: str, on_section=None, config_path: str = "config.yaml") -> str:
     """Run the full analysis. `on_section` gets one JSON string per section."""
-    s = json.loads(settings_json)
+    cfg, inputs, opts = prepare(json.loads(settings_json), config_path)
+
+    def emit(sec):
+        if on_section is None:
+            return
+        on_section(_json({"id": sec.id, "title": sec.title, "html": section_html(sec),
+                          "csv": {f"{sec.id}_{slug(k)}.csv": v[[c for c in v.columns if not str(c).startswith('_')]]
+                                  .to_csv(index=not isinstance(v.index, pd.RangeIndex))
+                                  for k, v in sec.tables.items()}}))
+
+    an = Analysis(cfg, inputs, opts, on_section=emit, log=None)
+    an.no_write = True
+    sections = an.run()
+    meta = {"label": inputs.label, "run_at": time.strftime("%Y-%m-%d %H:%M"), "connection": an.conn.describe(),
+            "price_variant": opts.price_variant}
+    return _json({"markdown": render_markdown(sections, meta, fig_dir_rel=None),
+                  "html": render_html(sections, meta)})
+
+
+def prepare(s: dict, config_path: str = "config.yaml"):
+    """(config, inputs, options) for a settings dict from the website form (or a profile)."""
     cfg = load_config(config_path)
     _merge(cfg, s.get("config_overrides") or {})
     cfg["paths"]["results_dir"] = s.get("results_dir", "results")
@@ -92,19 +112,4 @@ def run(settings_json: str, on_section=None, config_path: str = "config.yaml") -
                    plots=True, feed_in_2030=s.get("feed_in_2030"),
                    chosen_battery=s.get("chosen_battery") or None, battery_set=s.get("battery_set") or None,
                    kiln=kiln or None)
-
-    def emit(sec):
-        if on_section is None:
-            return
-        on_section(_json({"id": sec.id, "title": sec.title, "html": section_html(sec),
-                          "csv": {f"{sec.id}_{slug(k)}.csv": v[[c for c in v.columns if not str(c).startswith('_')]]
-                                  .to_csv(index=not isinstance(v.index, pd.RangeIndex))
-                                  for k, v in sec.tables.items()}}))
-
-    an = Analysis(cfg, inputs, opts, on_section=emit, log=None)
-    an.no_write = True
-    sections = an.run()
-    meta = {"label": inputs.label, "run_at": time.strftime("%Y-%m-%d %H:%M"), "connection": an.conn.describe(),
-            "price_variant": opts.price_variant}
-    return _json({"markdown": render_markdown(sections, meta, fig_dir_rel=None),
-                  "html": render_html(sections, meta)})
+    return cfg, inputs, opts

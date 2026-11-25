@@ -415,6 +415,30 @@ def test_run_survives_without_scipy(tmp_path, monkeypatch):
     assert "Optimiser not available" in secs["payback"].md
 
 
+def test_simple_dutch_page(tmp_path):
+    """The simplified Dutch page for another household: standard control only, one
+    'Meer details' dropdown per section, and the 'keep current contract' comparison."""
+    from battery_calc import report_nl
+    for y in (2024, 2025):
+        write_year(str(tmp_path), y, "comma_kwh")
+    bat = tmp_path / "b.csv"
+    src = pd.read_csv(os.path.join(ROOT, "data", "online", "batteries.csv"), dtype=str).iloc[[0]]
+    src["price_nl_incl_vat"] = "1000"
+    src.to_csv(bat, index=False)
+    cfg = dict(CFG)
+    cfg["paths"] = dict(CFG["paths"], price_glob=str(tmp_path / "jeroen_*.csv"), results_dir=str(tmp_path / "res"))
+    cfg["strategies"] = dict(CFG["strategies"], enabled=["self_consumption"])
+    cfg["skip_steps"] = ["kiln", "solar", "extension"]
+    an = Analysis(cfg, Inputs(batteries_csv=str(bat)), Options(plots=False, quick=True), log=None)
+    an.no_write = True
+    an.run()
+    assert set(an.records.strategy) == {"self_consumption"}
+    page = report_nl.render(an, {"label": "Test", "run_at": "", "period": ""})
+    assert page.count("<section>") == 8                      # advice + 7 numbered sections
+    assert page.count("<summary>Meer details</summary>") == 8
+    assert "Huidig contract houden" in page and "Advies" in page
+
+
 def test_hbc_extreme_pair_matching():
     from battery_calc.battery import CHARGE_PV, GRID_CHARGE, plan_hbc
     idx = pd.date_range("2025-01-06", periods=96, freq="15min", tz="Europe/Amsterdam")

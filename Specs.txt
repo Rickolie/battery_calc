@@ -681,3 +681,20 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
 - **Verdicts:** fits; fits but close at peaks (load management advised); does not fit without load management.
 - **Phase columns:** negative values written as text with a leading apostrophe ("'-396") are read correctly, and empty phase columns (1-phase connection) are left out.
 - **Peter's connection:** 1×35 A, single phase (his meter reports only L1).
+
+### 11.25 Simplified Dutch page for Peter (2026-11-25)
+
+- **Profile switch:** `report: {language: nl, simple: true}` in a profile makes `tools/precompute.py` build a simplified Dutch page (`battery_calc/report_nl.py`) instead of the full report, from the same Analysis run (`web_api.prepare` builds config, inputs and options).
+- **Sections:**
+  - Advice; 1 Uw verbruik; 2 Vermogen en aansluiting; 3 Uw huidige contract; 4 Contracten zonder batterij; 5 Batterijen; 6 Terugverdientijd; 7 De batterij door het jaar.
+  - The full report's break-even (6, 8), kiln (10), solar (11) and extension (12) sections are left out.
+  - Each section shows its key finding, a few lines and its main chart; all tables and explanations sit in **one** "Meer details" dropdown per section.
+- **Comparisons:** keep the current contract vs the cheapest fixed offer vs the cheapest dynamic contract, with and without each battery: yearly cost from 2027, battery saving, payback and NPV.
+- **Peter's profile:**
+  - Only the Marstek Venus E 3.0 5.12 / 10.24 / 15.36 kWh, with the battery's standard control (`strategies.enabled: [self_consumption]`) on every contract.
+  - `skip_steps: [kiln, solar, extension]`. The optimiser extras (break-even scales, gap table) are skipped when their strategies are not enabled.
+  - Builds in about 10 seconds.
+- **Other changes:**
+  - `chart_html` has Dutch hints.
+  - uPlot's x legend label is configurable (`xName`).
+  - Chart tooltips use Dutch number formatting.
