@@ -168,12 +168,16 @@ def section_md(sec, fig_dir_rel: str | None = None) -> str:
     return "\n".join(parts)
 
 
-def chart_html(spec: dict) -> str:
+def chart_html(spec: dict, lang: str = "en") -> str:
     """Placeholder + data for an interactive (zoomable) chart, rendered by static/charts.js."""
     import json
     data = json.dumps(spec, separators=(",", ":"), allow_nan=False, default=float).replace("</", "<\\/")
-    note = ("<p class='zoomhint'>Hover a bar, point or line to see the values.</p>" if spec.get("kind") else
-            "<p class='zoomhint'>Drag across the chart to zoom in, double-click to zoom out, click a legend item to hide it.</p>")
+    hints = {"en": ("Hover a bar, point or line to see the values.",
+                    "Drag across the chart to zoom in, double-click to zoom out, click a legend item to hide it."),
+             "nl": ("Wijs een staaf, punt of lijn aan om de waarden te zien.",
+                    "Sleep over de grafiek om in te zoomen, dubbelklik om uit te zoomen, klik op de legenda om een lijn te verbergen.")}
+    h = hints.get(lang, hints["en"])
+    note = f"<p class='zoomhint'>{h[0] if spec.get('kind') else h[1]}</p>"
     return f"<div class='ichart'></div><script type='application/json'>{data}</script>{note}"
 
 

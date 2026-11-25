@@ -115,9 +115,13 @@ class Analysis:
         self.step_breakeven()
         self.step_payback()          # also emits section 8 (break-even with simulated cycles)
         self.step_sanity()
-        self.step_kiln()
-        self.step_solar()
-        self.step_extension()
+        skip = set(self.cfg.get("skip_steps", []) or [])     # e.g. a simplified page for another household
+        if "kiln" not in skip:
+            self.step_kiln()
+        if "solar" not in skip:
+            self.step_solar()
+        if "extension" not in skip:
+            self.step_extension()
         self.step_advice()
         return self.sections
 
@@ -1419,6 +1423,12 @@ class Analysis:
                         "row": r})
         return out
 
+    def battery_price(self, b: Battery) -> float | None:
+        """The purchase price every calculation uses (NL, or the cheaper of NL/DE)."""
+        d = self.cfg.get("battery_defaults", {})
+        v = b.price_variants(float(d.get("de_travel_cost_eur", 0.0)), best=self.use_de)
+        return v.get(self.ref_variant, v.get("NL current"))
+
     def price_basis(self) -> str:
         if self.use_de:
             t = float(self.cfg.get("battery_defaults", {}).get("de_travel_cost_eur", 0.0))
@@ -1688,6 +1698,8 @@ class Analysis:
         foresight with fewer freedoms."""
         c = self.cheapest_dynamic()
         if c is None or not getattr(self, "focus", None) or not self.head_years or not lp_available():
+            return None
+        if not {"forecast", "perfect_foresight"} & set(self.cfg.get("strategies", {}).get("enabled", [])):
             return None
         scn, year = "nosal_min50", self.head_years[-1]
         pers = self.periods(c, scn, [year])
@@ -2566,6 +2578,8 @@ class Analysis:
         return self._avg_u
 
     def scale_variants(self, meta, contracts):
+        if "dynamic" not in self.cfg.get("strategies", {}).get("enabled", []):
+            return None
         dyn = [c for c in contracts if c.is_dynamic]
         if not dyn or not self.head_years:
             return None

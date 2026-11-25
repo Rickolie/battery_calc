@@ -73,6 +73,8 @@ def main():
         settings.update({"use_ricks": False, "label": profile.get("label", "Uploaded data"),
                          "p1_path": profile["p1_file"], "contract": profile.get("contract"),
                          "config_overrides": profile.get("config") or {}})
+    if profile and (profile.get("report") or {}).get("simple"):
+        return simple_page(profile, settings, out)
     sections = []
     t0 = time.time()
 
@@ -95,6 +97,25 @@ def main():
             f.write(result["html"])
     size = os.path.getsize(os.path.join(out, "sections.json")) / 1e6
     print(f"precomputed {len(sections)} sections in {meta['seconds']} s ({size:.1f} MB) -> {out}")
+
+
+def simple_page(profile: dict, settings: dict, out: str):
+    """A simplified page in the profile's language (report_nl) instead of the full report."""
+    from battery_calc import report_nl
+    from battery_calc.analysis import Analysis
+    t0 = time.time()
+    cfg, inputs, opts = web_api.prepare(settings)
+    an = Analysis(cfg, inputs, opts, log=None)
+    an.no_write = True
+    an.run()
+    rep = an.p1rep
+    meta = {"label": profile.get("label", ""), "run_at": time.strftime("%d-%m-%Y %H:%M"),
+            "period": f"{rep.first:%d-%m-%Y} – {rep.last:%d-%m-%Y}"}
+    page = report_nl.render(an, meta)
+    for name in ("index.html", "report.html"):
+        with open(os.path.join(out, name), "w", encoding="utf-8") as f:
+            f.write(page)
+    print(f"simple page for {meta['label']} in {time.time() - t0:.0f} s ({len(page) / 1e6:.1f} MB) -> {out}")
 
 
 if __name__ == "__main__":

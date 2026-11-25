@@ -8,8 +8,8 @@ label: Peter
 slug: peter
 p1_file: peter/P1e-2025-12-01-2026-11-24 1.csv
 contract:
-  supplier: Current contract
-  product: Essent variable (Peter)
+  supplier: Huidig contract
+  product: Essent variabel
   type: fixed                      # stated tariffs, not day-ahead prices
   duration_months: 12
   # current rates (2026, saldering)
@@ -29,6 +29,11 @@ contract:
     price_t2: 0.20258
     fixed_eur_year: 98.06          # € 0.36121/day incl. VAT ÷ 1.21 × 0.9
 config:
-  battery_set: shortlist          # 14 batteries, at least two per size class (keeps the deploy short)
+  # Simplified Dutch page: only the Marstek Venus E 3.0 sizes, with the battery's standard
+  # control (self-consumption from its own app) on every contract.
+  battery_set: [marstek_v3_5, marstek_v3_10, marstek_v3_15]
+  strategies: {enabled: [self_consumption]}
+  skip_steps: [kiln, solar, extension]
   connection: {default: 1x35}      # single phase: the meter only reports L1 (capacity tariff band t/m 1x80A)
   solar: {install_date: null, price_eur: null, kwp: null}
+report: {language: nl, simple: true}

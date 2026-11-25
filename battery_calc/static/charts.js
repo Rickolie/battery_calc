@@ -18,7 +18,7 @@
     div.dataset.done = "1";
     if (spec.kind) { svgChart(div, spec); return; }
     const data = [spec.x];
-    const series = [{ value: (u, ts) => ts == null ? "–" : new Date(ts * 1000).toLocaleString("nl-NL",
+    const series = [{ label: spec.xName || "Time", value: (u, ts) => ts == null ? "–" : new Date(ts * 1000).toLocaleString("nl-NL",
       spec.daily ? { dateStyle: "medium" } : { dateStyle: "short", timeStyle: "short" }) }];
     const scales = { x: { time: true } };
     let hasY2 = false;
@@ -74,7 +74,7 @@
   function money(v, unit) {
     if (v == null || isNaN(v)) return "–";
     const a = Math.abs(v);
-    const s = a >= 1000 ? Math.round(v).toLocaleString("nl-NL") : a >= 10 ? v.toFixed(0) : v.toFixed(1);
+    const s = v.toLocaleString("nl-NL", { maximumFractionDigits: a >= 10 ? 0 : 1, minimumFractionDigits: a >= 10 ? 0 : 1 });
     return unit === "€" ? "€" + s : s + (unit ? " " + unit : "");
   }
   function tooltip(div) {
