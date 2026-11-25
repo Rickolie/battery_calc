@@ -698,3 +698,11 @@ The CLI has the same options: `--batteries`, `--battery`, `--kiln-hours`, `--kil
   - `chart_html` has Dutch hints.
   - uPlot's x legend label is configurable (`xName`).
   - Chart tooltips use Dutch number formatting.
+
+11.26 Peter's page: smart control as an extra option on the dynamic contract
+  - Standard Marstek control (self_consumption) stays the basis on every contract.
+  - The cheapest dynamic contract also gets a row "Dynamisch met slimme sturing": the
+    `forecast` strategy (plan at 13:00 on tomorrow's hourly prices with a 3-day usage/solar
+    forecast), without curtailment (that needs a controllable inverter and adds ~€3/yr).
+  - Shown in the advice table/chart, the payback chart/table, and a bullet comparing smart
+    vs standard per size; the assumptions explain it needs extra software (Home Assistant).
